@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -287,6 +288,7 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 		modified := false
 
 		if operation == "add" {
+			// For adding, we use the exact IP format provided
 			if !ipSet[ip] {
 				ipSet[ip] = true
 				modified = true
@@ -302,15 +304,27 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 				)
 			}
 		} else if operation == "remove" {
-			if ipSet[ip] {
-				delete(ipSet, ip)
-				modified = true
-				c.logger.Info("Removing IP from database allow list",
-					zap.String("database", dbName),
-					zap.String("ip", ip),
-					zap.String("node", nodeName),
-				)
-			} else {
+			// For removing, we need to handle CIDR notation
+			ipToRemove := normalizeIP(ip)
+			found := false
+			
+			// Look for the IP in the allow list, considering CIDR notation
+			for entry := range ipSet {
+				if normalizeIP(entry) == ipToRemove {
+					delete(ipSet, entry)
+					found = true
+					modified = true
+					c.logger.Info("Removing IP from database allow list",
+						zap.String("database", dbName),
+						zap.String("ip", ip),
+						zap.String("node", nodeName),
+						zap.String("matched_entry", entry),
+					)
+					break
+				}
+			}
+			
+			if !found {
 				c.logger.Debug("IP not in database allow list",
 					zap.String("database", dbName),
 					zap.String("ip", ip),
@@ -337,4 +351,16 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 		}
 		return err
 	}, utils.DefaultIsRetryable)
+}
+
+// normalizeIP removes CIDR notation from an IP address, but only if it's a /32 (IPv4) or /128 (IPv6) subnet 
+// representing a single IP address
+// e.g., "192.168.1.1/32" becomes "192.168.1.1", but "192.168.1.0/24" remains "192.168.1.0/24"
+func normalizeIP(ip string) string {
+	if strings.HasSuffix(ip, "/32") || strings.HasSuffix(ip, "/128") {
+		if idx := strings.Index(ip, "/"); idx != -1 {
+			return ip[:idx]
+		}
+	}
+	return ip
 } 

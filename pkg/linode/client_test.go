@@ -412,4 +412,153 @@ func TestRateLimiter(t *testing.T) {
 	// Verify all expectations
 	api.AssertExpectations(t)
 	metrics.AssertExpectations(t)
+}
+
+// TestNormalizeIP tests the normalizeIP function
+func TestNormalizeIP(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "IP without CIDR",
+			input:    "192.168.1.1",
+			expected: "192.168.1.1",
+		},
+		{
+			name:     "IP with /32 CIDR",
+			input:    "192.168.1.1/32",
+			expected: "192.168.1.1",
+		},
+		{
+			name:     "IP with /24 CIDR",
+			input:    "192.168.1.0/24",
+			expected: "192.168.1.0/24", // Should not be stripped, as it's an actual subnet
+		},
+		{
+			name:     "IPv6 with /128 CIDR",
+			input:    "2001:db8::1/128",
+			expected: "2001:db8::1",
+		},
+		{
+			name:     "IPv6 with /64 CIDR",
+			input:    "2001:db8::/64",
+			expected: "2001:db8::/64", // Should not be stripped, as it's an actual subnet
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeIP(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestRemoveIPWithCIDR tests removing an IP when the allow list contains CIDR notation
+func TestRemoveIPWithCIDR(t *testing.T) {
+	// Create test dependencies
+	logger := zaptest.NewLogger(t)
+	cfg := &config.Config{
+		LinodeToken: "test-token",
+		APIRateLimit: 100,
+		Retry: config.RetryConfig{
+			MaxAttempts: 3,
+			InitialBackoff: 1 * time.Millisecond,
+			MaxBackoff: 5 * time.Millisecond,
+		},
+		Nodepools: []config.Nodepool{
+			{
+				Name: "production",
+				Databases: []config.Database{
+					{ID: "test-db", Name: "test-db-name"},
+				},
+			},
+		},
+	}
+
+	// Create mocks
+	mockAPI := &MockLinodeAPI{}
+	mockMetrics := &MockMetricsClient{}
+
+	// Set up expectations for the test
+	// The allow list contains the IP with CIDR notation
+	mockAPI.On("GetDatabaseAllowList", mock.Anything, "test-db").Return(
+		[]string{"172.105.162.60/32", "192.168.1.1"}, nil,
+	)
+	
+	// Expect the API to be called with the updated allow list (without the IP)
+	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"192.168.1.1"}).Return(nil)
+	
+	// Metrics expectations
+	mockMetrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.Anything).Return()
+	mockMetrics.On("IncrementAllowListUpdates", "test-db-name", "remove").Return()
+	mockMetrics.On("UpdatePendingDeletions", "production", 0).Return()
+
+	// Create client with mocks
+	client := NewClientWithAPI(logger, cfg, mockAPI, mockMetrics)
+
+	// Test removing an IP that exists in the allow list with CIDR notation
+	// We're trying to remove 172.105.162.60 but it's stored as 172.105.162.60/32
+	err := client.handleDeleteOperation(context.Background(), "production", cfg.Nodepools[0].Databases, "test-node", "172.105.162.60")
+	
+	// Verify expectations
+	assert.NoError(t, err)
+	mockAPI.AssertExpectations(t)
+	mockMetrics.AssertExpectations(t)
+}
+
+// TestDoesNotRemoveSubnet verifies that an IP with subnet mask (non-/32 CIDR) won't be removed
+// when trying to remove an IP that matches the subnet's prefix
+func TestDoesNotRemoveSubnet(t *testing.T) {
+	// Create test dependencies
+	logger := zaptest.NewLogger(t)
+	cfg := &config.Config{
+		LinodeToken: "test-token",
+		APIRateLimit: 100,
+		Retry: config.RetryConfig{
+			MaxAttempts: 3,
+			InitialBackoff: 1 * time.Millisecond,
+			MaxBackoff: 5 * time.Millisecond,
+		},
+		Nodepools: []config.Nodepool{
+			{
+				Name: "production",
+				Databases: []config.Database{
+					{ID: "test-db", Name: "test-db-name"},
+				},
+			},
+		},
+	}
+
+	// Create mocks
+	mockAPI := &MockLinodeAPI{}
+	mockMetrics := &MockMetricsClient{}
+
+	// Set up expectations for the test
+	// The allow list contains a subnet (non-/32 CIDR)
+	mockAPI.On("GetDatabaseAllowList", mock.Anything, "test-db").Return(
+		[]string{"192.168.1.0/24", "10.0.0.1"}, nil,
+	)
+	
+	// No changes should be made to the allow list since 192.168.1.1 should not match 192.168.1.0/24
+	// We should receive the full list back
+	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"192.168.1.0/24", "10.0.0.1"}).Return(nil).Maybe()
+	
+	// Metrics expectations
+	mockMetrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.Anything).Return()
+	mockMetrics.On("IncrementAllowListUpdates", "test-db-name", "remove").Return().Maybe()
+	mockMetrics.On("UpdatePendingDeletions", "production", 0).Return()
+
+	// Create client with mocks
+	client := NewClientWithAPI(logger, cfg, mockAPI, mockMetrics)
+
+	// Call the function under test - try to remove 192.168.1.1 when 192.168.1.0/24 is in the list
+	err := client.UpdateAllowList(context.Background(), "production", "test-node", "192.168.1.1", "remove")
+	
+	// Verify expectations
+	assert.NoError(t, err)
+	mockAPI.AssertExpectations(t)
+	mockMetrics.AssertExpectations(t)
 } 
