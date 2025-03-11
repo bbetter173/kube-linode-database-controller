@@ -34,13 +34,14 @@ var (
 	kubeconfig = flag.String("kubeconfig", "", "Path to kubeconfig file for out-of-cluster operation")
 	configFile = flag.String("config", "", "Path to configuration file")
 	metricsAddr = flag.String("metrics-addr", DefaultMetricsAddr, "Address to serve metrics on")
+	logLevel = flag.String("log-level", "", "Override log level (debug, info, warn, error)")
 )
 
 func main() {
 	// Parse command line flags
 	flag.Parse()
 	
-	// Initialize logger
+	// Initialize logger - initially with default log level, will be updated after config is loaded
 	logger, err := initLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
@@ -52,6 +53,26 @@ func main() {
 	cfg, err := config.Load(*configFile)
 	if err != nil {
 		logger.Fatal("Failed to load configuration", zap.Error(err))
+	}
+	
+	// Update logger with configured log level
+	logger, err = initLogger(cfg.LogLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to re-initialize logger with configured log level: %v\n", err)
+		os.Exit(1)
+	}
+	logger.Info("Log level set from configuration", zap.String("level", cfg.LogLevel))
+	
+	// Override log level from command-line flag if provided
+	if *logLevel != "" {
+		cfg.LogLevel = strings.ToLower(*logLevel)
+		// Re-initialize logger with new log level
+		logger, err = initLogger(cfg.LogLevel)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to re-initialize logger: %v\n", err)
+			os.Exit(1)
+		}
+		logger.Info("Log level overridden from command-line flag", zap.String("level", cfg.LogLevel))
 	}
 	
 	// Initialize metrics
@@ -218,13 +239,25 @@ func updateNodeCountMetrics(k8sClient *kubernetes.Client, metricsClient *metrics
 }
 
 // initLogger initializes the logger
-func initLogger() (*zap.Logger, error) {
+func initLogger(logLevel ...string) (*zap.Logger, error) {
 	config := zap.NewProductionConfig()
 	config.DisableCaller = false
 	config.DisableStacktrace = false
 	
-	// Adjust log level based on environment variable
-	if os.Getenv("DEBUG") == "true" {
+	// Use specified log level if provided
+	if len(logLevel) > 0 && logLevel[0] != "" {
+		switch logLevel[0] {
+		case "debug":
+			config.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+		case "info":
+			config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+		case "warn":
+			config.Level = zap.NewAtomicLevelAt(zap.WarnLevel)
+		case "error":
+			config.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+		}
+	} else if os.Getenv("DEBUG") == "true" {
+		// For backward compatibility
 		config.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
 	}
 	

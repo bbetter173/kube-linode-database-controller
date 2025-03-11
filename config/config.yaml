@@ -19,9 +19,6 @@ nodepools:
       - id: "654321" 
         name: "shared-db"
 
-# Node deletion delay in minutes
-nodeDeletionDelay: 5
-
 # API rate limit (requests per minute)
 apiRateLimit: 100
 

@@ -96,7 +96,7 @@ func (a *LinodeAPIAdapter) UpdateDatabaseAllowList(ctx context.Context, dbID str
 	return nil
 }
 
-// Client manages Linode API connectivity and implements LinodeClient
+// Client implements LinodeClient interface
 type Client struct {
 	api              LinodeAPI
 	logger           *zap.Logger
@@ -196,31 +196,25 @@ func (c *Client) handleAddOperation(ctx context.Context, nodepoolName string, da
 
 // handleDeleteOperation immediately removes an IP from database allow lists
 func (c *Client) handleDeleteOperation(ctx context.Context, nodepoolName string, databases []config.Database, nodeName, ip string) error {
+	c.logger.Debug("handleDeleteOperation called",
+		zap.String("nodepool", nodepoolName),
+		zap.String("node", nodeName),
+		zap.String("ip", ip),
+		zap.Int("database_count", len(databases)),
+	)
+	
 	// Update the pending deletions metric - set to 0 for immediate deletion
 	c.metrics.UpdatePendingDeletions(nodepoolName, 0)
 	
-	// Check if IP is still in use by other nodes in the same nodepool
-	stillInUse, err := c.isIPStillInUseByNodepool(ctx, nodepoolName, ip)
-	if err != nil {
-		c.logger.Error("Failed to check if IP is still in use",
-			zap.String("nodepool", nodepoolName),
-			zap.String("ip", ip),
-			zap.Error(err),
-		)
-		// Don't delete if we can't verify it's safe
-		return err
-	}
-
-	if stillInUse {
-		c.logger.Info("Skipping deletion because IP is still in use by other nodes",
-			zap.String("nodepool", nodepoolName),
-			zap.String("ip", ip),
-		)
-		return nil
-	}
-	
+	// Process each database for this nodepool
 	var lastErr error
 	for _, db := range databases {
+		c.logger.Debug("Removing IP from database allow list",
+			zap.String("database_id", db.ID),
+			zap.String("database_name", db.Name),
+			zap.String("ip", ip),
+		)
+		
 		if err := c.updateDatabaseAllowList(ctx, db.ID, db.Name, nodeName, ip, "remove"); err != nil {
 			c.logger.Error("Failed to remove IP from database allow list",
 				zap.String("database", db.Name),
@@ -229,6 +223,12 @@ func (c *Client) handleDeleteOperation(ctx context.Context, nodepoolName string,
 				zap.Error(err),
 			)
 			lastErr = err
+		} else {
+			c.logger.Info("Successfully removed IP from database allow list",
+				zap.String("database", db.Name),
+				zap.String("ip", ip),
+				zap.String("node", nodeName),
+			)
 		}
 	}
 	return lastErr
@@ -337,17 +337,4 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 		}
 		return err
 	}, utils.DefaultIsRetryable)
-}
-
-// isIPStillInUseByNodepool checks if an IP is still used by any node in the nodepool
-func (c *Client) isIPStillInUseByNodepool(ctx context.Context, nodepoolName, ip string) (bool, error) {
-	// This is a placeholder for the actual implementation
-	// In a real implementation, you would:
-	// 1. Query the Kubernetes API for all nodes in the nodepool
-	// 2. Check if any node has the IP address
-	// 3. Return true if found, false otherwise
-	
-	// For now, always return false (meaning the IP is not in use)
-	// This should be implemented with the actual Kubernetes client
-	return false, nil
 } 

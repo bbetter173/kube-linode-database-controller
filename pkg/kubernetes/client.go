@@ -310,7 +310,7 @@ func (c *Client) LogEvent(nodeName, eventType, reason, message string) error {
 	return nil
 }
 
-// getHostname returns the hostname of the pod
+// getHostname returns the hostname of the current machine
 func getHostname() string {
 	hostname, err := os.Hostname()
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -32,18 +33,18 @@ type RetryConfig struct {
 // Config represents the application configuration
 type Config struct {
 	Nodepools         []Nodepool  `yaml:"nodepools"`
-	NodeDeletionDelay int         `yaml:"nodeDeletionDelay"`
 	APIRateLimit      int         `yaml:"apiRateLimit"`
 	LinodeToken       string      `yaml:"-"` // Not stored in config file
 	Retry             RetryConfig `yaml:"retry"`
+	LogLevel          string      `yaml:"logLevel"` // Log level (debug, info, warn, error)
 }
 
 // DefaultConfig returns a configuration with reasonable defaults
 func DefaultConfig() *Config {
 	return &Config{
 		Nodepools:         []Nodepool{},
-		NodeDeletionDelay: 5, // 5 minutes
 		APIRateLimit:      100,
+		LogLevel:          "info", // Default log level
 		Retry: RetryConfig{
 			MaxAttempts:    5,
 			InitialBackoff: time.Second,
@@ -76,18 +77,15 @@ func LoadFromEnv() *Config {
 	config.LinodeToken = os.Getenv("LINODE_TOKEN")
 
 	// Override other settings from environment if provided
-	if val := os.Getenv("NODE_DELETION_DELAY"); val != "" {
-		var delay int
-		if _, err := fmt.Sscanf(val, "%d", &delay); err == nil && delay > 0 {
-			config.NodeDeletionDelay = delay
-		}
-	}
-
 	if val := os.Getenv("API_RATE_LIMIT"); val != "" {
 		var limit int
 		if _, err := fmt.Sscanf(val, "%d", &limit); err == nil && limit > 0 {
 			config.APIRateLimit = limit
 		}
+	}
+	
+	if val := os.Getenv("LOG_LEVEL"); val != "" {
+		config.LogLevel = strings.ToLower(val)
 	}
 
 	return config
@@ -126,13 +124,6 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	// Override other settings from environment if provided
-	if val := os.Getenv("NODE_DELETION_DELAY"); val != "" {
-		var delay int
-		if _, err := fmt.Sscanf(val, "%d", &delay); err == nil && delay > 0 {
-			config.NodeDeletionDelay = delay
-		}
-	}
-
 	if val := os.Getenv("API_RATE_LIMIT"); val != "" {
 		var limit int
 		if _, err := fmt.Sscanf(val, "%d", &limit); err == nil && limit > 0 {
@@ -140,6 +131,10 @@ func Load(configPath string) (*Config, error) {
 		}
 	}
 	
+	if val := os.Getenv("LOG_LEVEL"); val != "" {
+		config.LogLevel = strings.ToLower(val)
+	}
+
 	// Validate the final configuration
 	if err := config.Validate(); err != nil {
 		return nil, err
@@ -159,6 +154,19 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("at least one nodepool must be configured")
 	}
 
+	// Validate log level
+	validLogLevels := []string{"debug", "info", "warn", "error"}
+	isValidLogLevel := false
+	for _, level := range validLogLevels {
+		if c.LogLevel == level {
+			isValidLogLevel = true
+			break
+		}
+	}
+	if !isValidLogLevel {
+		return fmt.Errorf("invalid log level: %s. Valid values are: debug, info, warn, error", c.LogLevel)
+	}
+
 	for _, nodepool := range c.Nodepools {
 		if nodepool.Name == "" {
 			return fmt.Errorf("nodepool name cannot be empty")
@@ -175,10 +183,6 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("database name cannot be empty in nodepool %s", nodepool.Name)
 			}
 		}
-	}
-
-	if c.NodeDeletionDelay <= 0 {
-		return fmt.Errorf("node deletion delay must be a positive integer")
 	}
 
 	if c.APIRateLimit <= 0 {

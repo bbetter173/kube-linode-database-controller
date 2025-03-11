@@ -38,9 +38,6 @@ nodepools:
       - id: "789012"
         name: "staging-db"
 
-# Node deletion delay in minutes (default: 5)
-nodeDeletionDelay: 5
-
 # API rate limit (requests per minute, default: 100)
 apiRateLimit: 100
 
@@ -50,29 +47,3 @@ retry:
   initialBackoff: 1s
   maxBackoff: 30s
 ```
-
-## Deployment
-
-Deploy as a Kubernetes Deployment with multiple replicas:
-
-```bash
-kubectl apply -f deployments/kubernetes/
-```
-
-## Development
-
-```bash
-# Run locally with a kubeconfig file
-go run cmd/nodewatcher/main.go --kubeconfig=$HOME/.kube/config
-
-# Build
-go build -o bin/nodewatcher cmd/nodewatcher/main.go
-
-# Run tests
-go test ./...
-```
-
-## Security
-
-- Linode API credentials should be stored as Kubernetes Secrets
-- The application runs with minimal RBAC permissions following the Principle of Least Privilege 

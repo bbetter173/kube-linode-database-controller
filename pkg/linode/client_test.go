@@ -293,7 +293,6 @@ func TestHandleDeleteOperation(t *testing.T) {
 	cfg := &config.Config{
 		LinodeToken: "test-token",
 		APIRateLimit: 100,
-		NodeDeletionDelay: 1, // No longer used, node deletion is immediate now
 		Retry: config.RetryConfig{
 			MaxAttempts: 3,
 			InitialBackoff: 1 * time.Millisecond,
