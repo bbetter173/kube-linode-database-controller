@@ -34,7 +34,7 @@ func createTestNode(name, nodepool string, addresses []corev1.NodeAddress) *core
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				NodePoolLabelKey: nodepool,
+				"mediahq.switch.tv/nodepool": nodepool,
 			},
 		},
 		Status: corev1.NodeStatus{
@@ -45,7 +45,9 @@ func createTestNode(name, nodepool string, addresses []corev1.NodeAddress) *core
 
 func TestGetNodepoolName(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	cfg := &config.Config{}
+	cfg := &config.Config{
+		NodepoolLabelKey: "mediahq.switch.tv/nodepool",
+	}
 	
 	client := &Client{
 		logger: logger,
@@ -63,7 +65,7 @@ func TestGetNodepoolName(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-node",
 					Labels: map[string]string{
-						NodePoolLabelKey: "production",
+						"mediahq.switch.tv/nodepool": "production",
 					},
 				},
 			},
@@ -128,10 +130,13 @@ func TestGetNodesByNodepool(t *testing.T) {
 	_, err = fakeClientset.CoreV1().Nodes().Create(context.Background(), otherNode, metav1.CreateOptions{})
 	assert.NoError(t, err)
 
+	// Define the nodepool label key for testing
+	nodepoolLabelKey := "mediahq.switch.tv/nodepool"
+	
 	// Create a custom implementation for GetNodesByNodepool to work with the fake clientset
 	getNodesByNodepool := func(nodepoolName string) ([]*corev1.Node, error) {
 		// Create selector to filter by nodepool label
-		selector := fmt.Sprintf("%s=%s", NodePoolLabelKey, nodepoolName)
+		selector := fmt.Sprintf("%s=%s", nodepoolLabelKey, nodepoolName)
 		
 		// List nodes with the nodepool label
 		nodeList, err := fakeClientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{
@@ -303,6 +308,7 @@ func TestOnNodeAdded(t *testing.T) {
 	client := &Client{
 		logger: logger,
 		config: &config.Config{
+			NodepoolLabelKey: "mediahq.switch.tv/nodepool",
 			Nodepools: []config.Nodepool{
 				{
 					Name: "production",
@@ -323,7 +329,7 @@ func TestOnNodeAdded(t *testing.T) {
 	})
 	
 	// Set up expectations for the handler
-	mockHandler.On("Handle", node, "add").Return(nil)
+	mockHandler.On("Handle", mock.Anything, "add").Return(nil)
 	
 	// Create a mock informer
 	informer := &MockInformer{
@@ -347,7 +353,9 @@ func TestOnNodeAdded(t *testing.T) {
 	
 	// Trigger an add event manually by calling OnAdd directly on each handler
 	for _, handler := range informer.handlers {
-		handler.OnAdd(node, false)
+		if addHandler, ok := handler.(cache.ResourceEventHandler); ok {
+			addHandler.OnAdd(node, false)
+		}
 	}
 	
 	// Verify expectations
@@ -362,6 +370,7 @@ func TestOnNodeDeleted(t *testing.T) {
 	
 	// Create config for the test
 	cfg := &config.Config{
+		NodepoolLabelKey: "mediahq.switch.tv/nodepool",
 		Nodepools: []config.Nodepool{
 			{
 				Name: "production",
@@ -390,7 +399,7 @@ func TestOnNodeDeleted(t *testing.T) {
 	})
 	
 	// Set up expectations for the handler
-	mockHandler.On("Handle", node, "delete").Return(nil)
+	mockHandler.On("Handle", mock.Anything, "delete").Return(nil)
 	
 	// Create a mock informer
 	informer := &MockInformer{
@@ -414,7 +423,9 @@ func TestOnNodeDeleted(t *testing.T) {
 	
 	// Trigger a delete event by directly calling OnDelete on each handler
 	for _, handler := range informer.handlers {
-		handler.OnDelete(node)
+		if deleteHandler, ok := handler.(cache.ResourceEventHandler); ok {
+			deleteHandler.OnDelete(node)
+		}
 	}
 	
 	// Verify expectations
@@ -469,8 +480,9 @@ func (m *MockClient) GetExternalIP(node *corev1.Node) (string, error) {
 }
 
 func (m *MockClient) GetNodesByNodepool(nodepoolName string) ([]*corev1.Node, error) {
+	labelKey := m.config.NodepoolLabelKey
 	nodeList, err := m.mockClientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", NodePoolLabelKey, nodepoolName),
+		LabelSelector: fmt.Sprintf("%s=%s", labelKey, nodepoolName),
 	})
 	if err != nil {
 		return nil, err
@@ -526,4 +538,243 @@ func (m *MockInformer) HasSynced() bool {
 func (m *MockInformer) LastSyncResourceVersion() string {
 	// Not used in current tests
 	return ""
+}
+
+// TestNodeUpdateWithLabelChange tests handling of node label changes and removals
+func TestNodeUpdateWithLabelChange(t *testing.T) {
+	// Create a mock logger
+	logger := zaptest.NewLogger(t)
+
+	// Create config for the test
+	cfg := &config.Config{
+		NodepoolLabelKey: "mediahq.switch.tv/nodepool",
+		Nodepools: []config.Nodepool{
+			{
+				Name: "production",
+			},
+			{
+				Name: "staging",
+			},
+		},
+	}
+	
+	// Create mock handlers for add and delete operations
+	mockAddHandler := &MockNodeHandler{}
+	mockDelHandler := &MockNodeHandler{}
+	
+	// Create a client with the mock handlers
+	client := &Client{
+		logger: logger,
+		config: cfg,
+		stopCh: make(chan struct{}),
+	}
+	
+	// Register the node handlers
+	client.nodeAddHandler = func(node *corev1.Node, eventType string) error {
+		return mockAddHandler.Handle(node, eventType)
+	}
+	client.nodeDelHandler = func(node *corev1.Node, eventType string) error {
+		return mockDelHandler.Handle(node, eventType)
+	}
+	
+	// Create a mock informer
+	informer := &MockInformer{
+		handlers: []cache.ResourceEventHandler{},
+	}
+	
+	// Set up expectation for the AddEventHandler method
+	informer.On("AddEventHandler", mock.AnythingOfType("cache.ResourceEventHandlerFuncs")).Return()
+	
+	// Add the event handler
+	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldNode := oldObj.(*corev1.Node)
+			newNode := newObj.(*corev1.Node)
+			
+			// Check if node was added to or removed from a watched nodepool
+			oldNodepool := client.getNodepoolName(oldNode)
+			newNodepool := client.getNodepoolName(newNode)
+			
+			oldIsWatched := client.isNodeInWatchedNodepool(oldNode)
+			newIsWatched := client.isNodeInWatchedNodepool(newNode)
+			
+			if !oldIsWatched && newIsWatched {
+				// Node added to a watched nodepool
+				if err := client.nodeAddHandler(newNode, "add"); err != nil {
+					t.Errorf("Error handling node add to nodepool: %v", err)
+				}
+			} else if oldIsWatched && !newIsWatched {
+				// Node removed from a watched nodepool
+				if err := client.nodeDelHandler(oldNode, "delete"); err != nil {
+					t.Errorf("Error handling node remove from nodepool: %v", err)
+				}
+			} else if oldIsWatched && newIsWatched && oldNodepool != newNodepool {
+				// Node moved between watched nodepools
+				if err := client.nodeDelHandler(oldNode, "delete"); err != nil {
+					t.Errorf("Error handling node remove from old nodepool: %v", err)
+				}
+				if err := client.nodeAddHandler(newNode, "add"); err != nil {
+					t.Errorf("Error handling node add to new nodepool: %v", err)
+				}
+			}
+		},
+	})
+	
+	// Test case 1: Add nodepool label (previously unlabeled)
+	t.Run("Add nodepool label", func(t *testing.T) {
+		mockAddHandler.ExpectedCalls = nil
+		mockDelHandler.ExpectedCalls = nil
+		
+		// Create nodes for before and after state
+		oldNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node-1",
+				Labels: map[string]string{
+					"other-label": "value",
+				},
+			},
+		}
+		
+		newNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node-1",
+				Labels: map[string]string{
+					"other-label": "value",
+					"mediahq.switch.tv/nodepool": "production",
+				},
+			},
+		}
+		
+		// Set up expectations for the handler
+		mockAddHandler.On("Handle", newNode, "add").Return(nil)
+		
+		// Trigger an update event by calling OnUpdate directly on each handler
+		for _, handler := range informer.handlers {
+			handler.OnUpdate(oldNode, newNode)
+		}
+		
+		// Verify expectations
+		mockAddHandler.AssertExpectations(t)
+		mockDelHandler.AssertExpectations(t)
+	})
+	
+	// Test case 2: Remove nodepool label
+	t.Run("Remove nodepool label", func(t *testing.T) {
+		mockAddHandler.ExpectedCalls = nil
+		mockDelHandler.ExpectedCalls = nil
+		
+		// Create nodes for before and after state
+		oldNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node-2",
+				Labels: map[string]string{
+					"other-label": "value",
+					"mediahq.switch.tv/nodepool": "production",
+				},
+			},
+		}
+		
+		newNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node-2",
+				Labels: map[string]string{
+					"other-label": "value",
+				},
+			},
+		}
+		
+		// Set up expectations for the handler
+		mockDelHandler.On("Handle", oldNode, "delete").Return(nil)
+		
+		// Trigger an update event by calling OnUpdate directly on each handler
+		for _, handler := range informer.handlers {
+			handler.OnUpdate(oldNode, newNode)
+		}
+		
+		// Verify expectations
+		mockAddHandler.AssertExpectations(t)
+		mockDelHandler.AssertExpectations(t)
+	})
+	
+	// Test case 3: Change nodepool label from one watched nodepool to another
+	t.Run("Change between watched nodepools", func(t *testing.T) {
+		mockAddHandler.ExpectedCalls = nil
+		mockDelHandler.ExpectedCalls = nil
+		
+		// Create nodes for before and after state
+		oldNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node-3",
+				Labels: map[string]string{
+					"other-label": "value",
+					"mediahq.switch.tv/nodepool": "production",
+				},
+			},
+		}
+		
+		newNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node-3",
+				Labels: map[string]string{
+					"other-label": "value",
+					"mediahq.switch.tv/nodepool": "staging",
+				},
+			},
+		}
+		
+		// Set up expectations for the handlers
+		mockDelHandler.On("Handle", oldNode, "delete").Return(nil)
+		mockAddHandler.On("Handle", newNode, "add").Return(nil)
+		
+		// Trigger an update event by calling OnUpdate directly on each handler
+		for _, handler := range informer.handlers {
+			handler.OnUpdate(oldNode, newNode)
+		}
+		
+		// Verify expectations
+		mockAddHandler.AssertExpectations(t)
+		mockDelHandler.AssertExpectations(t)
+	})
+	
+	// Test case 4: Change nodepool label from watched to unwatched
+	t.Run("Change from watched to unwatched nodepool", func(t *testing.T) {
+		mockAddHandler.ExpectedCalls = nil
+		mockDelHandler.ExpectedCalls = nil
+		
+		// Create nodes for before and after state
+		oldNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node-4",
+				Labels: map[string]string{
+					"other-label": "value",
+					"mediahq.switch.tv/nodepool": "production",
+				},
+			},
+		}
+		
+		newNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node-4",
+				Labels: map[string]string{
+					"other-label": "value",
+					"mediahq.switch.tv/nodepool": "other",
+				},
+			},
+		}
+		
+		// Set up expectations for the handler
+		mockDelHandler.On("Handle", oldNode, "delete").Return(nil)
+		
+		// Trigger an update event by calling OnUpdate directly on each handler
+		for _, handler := range informer.handlers {
+			handler.OnUpdate(oldNode, newNode)
+		}
+		
+		// Verify expectations
+		mockAddHandler.AssertExpectations(t)
+		mockDelHandler.AssertExpectations(t)
+	})
+	
+	// Verify all mock expectations
+	informer.AssertExpectations(t)
 } 

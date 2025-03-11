@@ -37,6 +37,7 @@ type Config struct {
 	LinodeToken       string      `yaml:"-"` // Not stored in config file
 	Retry             RetryConfig `yaml:"retry"`
 	LogLevel          string      `yaml:"logLevel"` // Log level (debug, info, warn, error)
+	NodepoolLabelKey  string      `yaml:"nodepoolLabelKey"` // Label key used to identify node pools
 }
 
 // DefaultConfig returns a configuration with reasonable defaults
@@ -45,6 +46,7 @@ func DefaultConfig() *Config {
 		Nodepools:         []Nodepool{},
 		APIRateLimit:      100,
 		LogLevel:          "info", // Default log level
+		NodepoolLabelKey:  "mediahq.switch.tv/nodepool", // Default label key
 		Retry: RetryConfig{
 			MaxAttempts:    5,
 			InitialBackoff: time.Second,
@@ -86,6 +88,10 @@ func LoadFromEnv() *Config {
 	
 	if val := os.Getenv("LOG_LEVEL"); val != "" {
 		config.LogLevel = strings.ToLower(val)
+	}
+	
+	if val := os.Getenv("NODEPOOL_LABEL_KEY"); val != "" {
+		config.NodepoolLabelKey = val
 	}
 
 	return config
@@ -134,6 +140,10 @@ func Load(configPath string) (*Config, error) {
 	if val := os.Getenv("LOG_LEVEL"); val != "" {
 		config.LogLevel = strings.ToLower(val)
 	}
+	
+	if val := os.Getenv("NODEPOOL_LABEL_KEY"); val != "" {
+		config.NodepoolLabelKey = val
+	}
 
 	// Validate the final configuration
 	if err := config.Validate(); err != nil {
@@ -165,6 +175,11 @@ func (c *Config) Validate() error {
 	}
 	if !isValidLogLevel {
 		return fmt.Errorf("invalid log level: %s. Valid values are: debug, info, warn, error", c.LogLevel)
+	}
+
+	// Validate nodepool label key
+	if c.NodepoolLabelKey == "" {
+		return fmt.Errorf("nodepool label key cannot be empty")
 	}
 
 	for _, nodepool := range c.Nodepools {

@@ -206,7 +206,7 @@ func (c *Client) watchNodes(ctx context.Context) error {
 				zap.String("new_labels", fmt.Sprintf("%v", newNode.Labels)),
 			)
 			
-			// Check if this is a node that was just added to a watched nodepool
+			// Check if this is a node that was just added to or removed from a watched nodepool
 			oldNodepool := c.getNodepoolName(oldNode)
 			newNodepool := c.getNodepoolName(newNode)
 			
@@ -227,11 +227,12 @@ func (c *Client) watchNodes(ctx context.Context) error {
 					)
 				}
 			} else if oldIsWatched && !newIsWatched {
-				// If the node was removed from a watched nodepool, treat it as a Delete
+				// If the node was removed from a watched nodepool (including label removal), treat it as a Delete
 				c.logger.Info("Node removed from watched nodepool",
 					zap.String("node", newNode.Name),
 					zap.String("old_nodepool", oldNodepool),
 					zap.String("new_nodepool", newNodepool),
+					zap.Bool("label_removed", newNodepool == ""),
 				)
 				if err := c.nodeDelHandler(oldNode, "delete"); err != nil {
 					c.logger.Error("Error handling node remove from nodepool event",
@@ -239,8 +240,32 @@ func (c *Client) watchNodes(ctx context.Context) error {
 						zap.Error(err),
 					)
 				}
+			} else if oldIsWatched && newIsWatched && oldNodepool != newNodepool {
+				// Handle the case where the node moved between watched nodepools
+				c.logger.Info("Node moved between watched nodepools",
+					zap.String("node", newNode.Name),
+					zap.String("old_nodepool", oldNodepool),
+					zap.String("new_nodepool", newNodepool),
+				)
+				
+				// First delete from old nodepool
+				if err := c.nodeDelHandler(oldNode, "delete"); err != nil {
+					c.logger.Error("Error handling node removal from old nodepool",
+						zap.String("node", oldNode.Name),
+						zap.String("old_nodepool", oldNodepool),
+						zap.Error(err),
+					)
+				}
+				
+				// Then add to new nodepool
+				if err := c.nodeAddHandler(newNode, "add"); err != nil {
+					c.logger.Error("Error handling node addition to new nodepool",
+						zap.String("node", newNode.Name),
+						zap.String("new_nodepool", newNodepool),
+						zap.Error(err),
+					)
+				}
 			}
-			// Don't process other updates
 		},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*corev1.Node)
@@ -434,7 +459,7 @@ func (c *Client) getNodepoolName(node *corev1.Node) string {
 		return ""
 	}
 	
-	return node.Labels[NodePoolLabelKey]
+	return node.Labels[c.config.NodepoolLabelKey]
 }
 
 // GetExternalIP gets the external IP address of a node
@@ -462,7 +487,7 @@ func (c *Client) GetExternalIP(node *corev1.Node) (string, error) {
 // GetNodesByNodepool returns all nodes in a specific nodepool
 func (c *Client) GetNodesByNodepool(nodepoolName string) ([]*corev1.Node, error) {
 	// Create selector to filter by nodepool label
-	selector := labels.Set{NodePoolLabelKey: nodepoolName}.AsSelector()
+	selector := labels.Set{c.config.NodepoolLabelKey: nodepoolName}.AsSelector()
 	
 	// List nodes with the nodepool label
 	nodeList, err := c.clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{
