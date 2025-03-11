@@ -1,0 +1,32 @@
+# Sample configuration for the Linode Database Allow List Manager
+
+# Nodepool to database mappings
+nodepools:
+  - name: "production"
+    databases:
+      - id: "123456"
+        name: "production-db"
+      - id: "654321"
+        name: "shared-db"
+  - name: "staging"
+    databases:
+      - id: "789012"
+        name: "staging-db"
+  - name: "development"
+    databases:
+      - id: "345678"
+        name: "dev-db"
+      - id: "654321" 
+        name: "shared-db"
+
+# Node deletion delay in minutes
+nodeDeletionDelay: 5
+
+# API rate limit (requests per minute)
+apiRateLimit: 100
+
+# Retry configuration
+retry:
+  maxAttempts: 5
+  initialBackoff: 1s
+  maxBackoff: 30s 

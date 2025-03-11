@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: linode-db-allowlist
+  labels:
+    app.kubernetes.io/name: linode-db-allowlist
+    app.kubernetes.io/part-of: linode-db-allowlist 

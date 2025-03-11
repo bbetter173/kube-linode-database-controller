@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: linode-db-allowlist
+  namespace: linode-db-allowlist
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: linode-db-allowlist
+rules:
+  # Access to watch nodes
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  # Access to create events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Access to manage leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: linode-db-allowlist
+subjects:
+  - kind: ServiceAccount
+    name: linode-db-allowlist
+    namespace: linode-db-allowlist
+roleRef:
+  kind: ClusterRole
+  name: linode-db-allowlist
+  apiGroup: rbac.authorization.k8s.io 
