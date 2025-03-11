@@ -2,7 +2,6 @@ package linode
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -176,16 +175,15 @@ func TestUpdateAllowList(t *testing.T) {
 		metrics.AssertExpectations(t)
 	})
 	
-	t.Run("Skip removing IP not in list", func(t *testing.T) {
+	t.Run("Skips removal when IP not in list", func(t *testing.T) {
 		// Create mocks
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations
+		// Setup mock expectations - IP is not in the list, so no update should happen
 		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Once()
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.AnythingOfType("float64")).Once()
 		metrics.On("UpdatePendingDeletions", "production", 0).Once()
-		// Note: No UpdateDatabaseAllowList or IncrementAllowListUpdates calls expected
 		
 		// Create client with mocks
 		client := NewClientWithAPI(logger, cfg, api, metrics)
@@ -197,6 +195,8 @@ func TestUpdateAllowList(t *testing.T) {
 		require.NoError(t, err)
 		api.AssertExpectations(t)
 		metrics.AssertExpectations(t)
+		// Verify that UpdateDatabaseAllowList is not called
+		api.AssertNotCalled(t, "UpdateDatabaseAllowList")
 	})
 	
 	t.Run("Detects 0.0.0.0/0 in allow list", func(t *testing.T) {
@@ -293,7 +293,7 @@ func TestHandleDeleteOperation(t *testing.T) {
 	cfg := &config.Config{
 		LinodeToken: "test-token",
 		APIRateLimit: 100,
-		NodeDeletionDelay: 1, // 1 minute (we'll speed this up for testing)
+		NodeDeletionDelay: 1, // No longer used, node deletion is immediate now
 		Retry: config.RetryConfig{
 			MaxAttempts: 3,
 			InitialBackoff: 1 * time.Millisecond,
@@ -309,7 +309,7 @@ func TestHandleDeleteOperation(t *testing.T) {
 		},
 	}
 	
-	t.Run("Schedules deletion timer", func(t *testing.T) {
+	t.Run("Immediately removes IP from allow list", func(t *testing.T) {
 		// Create mocks
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
@@ -319,90 +319,42 @@ func TestHandleDeleteOperation(t *testing.T) {
 		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1"}).Return(nil).Once()
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.AnythingOfType("float64")).Once()
 		metrics.On("IncrementAllowListUpdates", "test-db-name", "remove").Once()
+		metrics.On("UpdatePendingDeletions", "production", 0).Once() // Called with 0 for immediate deletion
+		
+		// Create client with mocks
+		client := NewClientWithAPI(logger, cfg, api, metrics)
+		
+		// Call the function
+		err := client.UpdateAllowList(context.Background(), "production", "test-node", "2.2.2.2", "remove")
+		
+		// Verify results
+		require.NoError(t, err)
+		api.AssertExpectations(t)
+		metrics.AssertExpectations(t)
+	})
+	
+	t.Run("Skips removal when IP not in list", func(t *testing.T) {
+		// Create mocks
+		api := &MockLinodeAPI{}
+		metrics := &MockMetricsClient{}
+		
+		// Setup mock expectations - IP is not in the list, so no update should happen
+		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Once()
+		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.AnythingOfType("float64")).Once()
 		metrics.On("UpdatePendingDeletions", "production", 0).Once()
 		
 		// Create client with mocks
 		client := NewClientWithAPI(logger, cfg, api, metrics)
 		
-		// Call the function with a very short delay to make the test fast
-		ctx := context.Background()
-		// Override the delay just for this test
-		origDelay := client.config.NodeDeletionDelay
-		client.config.NodeDeletionDelay = 0 // immediate for test
-		defer func() {
-			client.config.NodeDeletionDelay = origDelay
-		}()
+		// Call the function
+		err := client.UpdateAllowList(context.Background(), "production", "test-node", "2.2.2.2", "remove")
 		
-		// Run the delete operation
-		err := client.UpdateAllowList(ctx, "production", "test-node", "2.2.2.2", "remove")
+		// Verify results
 		require.NoError(t, err)
-		
-		// Verify all expectations
 		api.AssertExpectations(t)
 		metrics.AssertExpectations(t)
-	})
-	
-	t.Run("Cancels pending timer when node is added back", func(t *testing.T) {
-		// Create mocks
-		api := &MockLinodeAPI{}
-		metrics := &MockMetricsClient{}
-		
-		// Create client with mocks
-		client := NewClientWithAPI(logger, cfg, api, metrics)
-		
-		// Set a very long delay so the timer doesn't fire during the test
-		origDelay := client.config.NodeDeletionDelay
-		client.config.NodeDeletionDelay = 10 // 10 minutes
-		defer func() {
-			client.config.NodeDeletionDelay = origDelay
-		}()
-		
-		ctx := context.Background()
-		
-		// First schedule a deletion
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1", "2.2.2.2"}, nil).Run(func(args mock.Arguments) {
-			fmt.Println("Mock GetDatabaseAllowList called for remove operation")
-		}).Maybe()
-		metrics.On("UpdatePendingDeletions", "production", 1).Run(func(args mock.Arguments) {
-			fmt.Println("Mock UpdatePendingDeletions called with count 1")
-		}).Once()
-		err := client.UpdateAllowList(ctx, "production", "test-node", "2.2.2.2", "remove")
-		require.NoError(t, err)
-		fmt.Println("After remove operation, pendingDeletions:", client.pendingDeletions)
-		
-		// Now add the same IP back, which should cancel the deletion
-		
-		// Use a different IP to force the update
-		testIP := "2.2.2.2" // Same as the one used in the remove operation
-		
-		// Force the implementation to update the list by returning a list without the IP
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Run(func(args mock.Arguments) {
-			fmt.Println("Mock GetDatabaseAllowList called for add operation")
-		}).Maybe()
-		
-		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1", testIP}).Run(func(args mock.Arguments) {
-			fmt.Println("Mock UpdateDatabaseAllowList called for add operation")
-		}).Return(nil).Maybe()
-		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "add", mock.AnythingOfType("float64")).Run(func(args mock.Arguments) {
-			fmt.Println("Mock ObserveAllowListUpdateLatency called for add operation")
-		}).Once()
-		metrics.On("IncrementAllowListUpdates", "test-db-name", "add").Run(func(args mock.Arguments) {
-			fmt.Println("Mock IncrementAllowListUpdates called for add operation")
-		}).Once()
-		metrics.On("UpdatePendingDeletions", "production", 0).Run(func(args mock.Arguments) {
-			fmt.Println("Mock UpdatePendingDeletions called with count 0")
-		}).Once()
-		
-		// Call the function
-		err = client.UpdateAllowList(ctx, "production", "test-node", testIP, "add")
-		require.NoError(t, err)
-		fmt.Println("After add operation, pendingDeletions:", client.pendingDeletions)
-		
-		// Verify only the metrics expectations
-		metrics.AssertExpectations(t)
-		
-		// Verify that the pendingDeletions map is empty
-		require.Empty(t, client.pendingDeletions, "pendingDeletions should be empty after cancellation")
+		// Verify that UpdateDatabaseAllowList is not called
+		api.AssertNotCalled(t, "UpdateDatabaseAllowList")
 	})
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -55,15 +56,43 @@ type LinodeAPIAdapter struct {
 
 // GetDatabaseAllowList implements the LinodeAPI interface
 func (a *LinodeAPIAdapter) GetDatabaseAllowList(ctx context.Context, dbID string) ([]string, error) {
-	// In a real implementation, this would call the actual Linode API
-	// For now, this is a placeholder until the Linode API supports database allow lists
-	return []string{}, nil
+	// Convert dbID from string to int
+	dbIDInt, err := strconv.Atoi(dbID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid database ID %s: %w", dbID, err)
+	}
+	
+	// Get the database with the specified ID
+	database, err := a.client.GetMySQLDatabase(ctx, dbIDInt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database %s: %w", dbID, err)
+	}
+	
+	// Return the allow list from the database
+	return database.AllowList, nil
 }
 
 // UpdateDatabaseAllowList implements the LinodeAPI interface
 func (a *LinodeAPIAdapter) UpdateDatabaseAllowList(ctx context.Context, dbID string, allowList []string) error {
-	// In a real implementation, this would call the actual Linode API
-	// For now, this is a placeholder until the Linode API supports database allow lists
+	// Convert dbID from string to int
+	dbIDInt, err := strconv.Atoi(dbID)
+	if err != nil {
+		return fmt.Errorf("invalid database ID %s: %w", dbID, err)
+	}
+	
+	// Create the update options with the new allow list
+	// AllowList needs to be a pointer to []string
+	allowListCopy := allowList
+	updateOpts := linodego.MySQLUpdateOptions{
+		AllowList: &allowListCopy,
+	}
+	
+	// Update the database
+	_, err = a.client.UpdateMySQLDatabase(ctx, dbIDInt, updateOpts)
+	if err != nil {
+		return fmt.Errorf("failed to update database %s allow list: %w", dbID, err)
+	}
+	
 	return nil
 }
 
@@ -75,10 +104,9 @@ type Client struct {
 	metrics          MetricsClient
 	mutex            sync.Mutex
 	rateLimiter      *rate.Limiter
-	pendingDeletions map[string]map[string]*time.Timer // nodepool -> IP -> timer
 }
 
-// NewClient creates a new Linode client
+// NewClient creates a new LinodeClient
 func NewClient(logger *zap.Logger, cfg *config.Config, metricsClient MetricsClient) *Client {
 	// Create OAuth2 token source
 	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{
@@ -105,11 +133,10 @@ func NewClient(logger *zap.Logger, cfg *config.Config, metricsClient MetricsClie
 		config:           cfg,
 		metrics:          metricsClient,
 		rateLimiter:      rate.NewLimiter(rate.Limit(rps), 1),
-		pendingDeletions: make(map[string]map[string]*time.Timer),
 	}
 }
 
-// NewClientWithAPI creates a new Linode client with a custom API client (for testing)
+// NewClientWithAPI creates a new LinodeClient with a custom API implementation
 func NewClientWithAPI(logger *zap.Logger, cfg *config.Config, api LinodeAPI, metricsClient MetricsClient) *Client {
 	// Calculate requests per second based on rate limit
 	rps := float64(cfg.APIRateLimit) / 60.0
@@ -120,7 +147,6 @@ func NewClientWithAPI(logger *zap.Logger, cfg *config.Config, api LinodeAPI, met
 		config:           cfg,
 		metrics:          metricsClient,
 		rateLimiter:      rate.NewLimiter(rate.Limit(rps), 1),
-		pendingDeletions: make(map[string]map[string]*time.Timer),
 	}
 }
 
@@ -150,84 +176,9 @@ func (c *Client) UpdateAllowList(ctx context.Context, nodepoolName, nodeName, ip
 
 // handleAddOperation adds an IP to all databases associated with a nodepool
 func (c *Client) handleAddOperation(ctx context.Context, nodepoolName string, databases []config.Database, nodeName, ip string) error {
-	// Check if we need to cancel a pending deletion
-	var pendingDeletionNodesToRemove []string
-	var canceledDeletion bool
-	
-	c.mutex.Lock()
-	// Check all nodepools for pending deletions of this IP
-	for npName, ipMap := range c.pendingDeletions {
-		if timer, exists := ipMap[ip]; exists {
-			// Cancel the timer
-			timer.Stop()
-			delete(ipMap, ip)
-			if len(ipMap) == 0 {
-				delete(c.pendingDeletions, npName)
-			}
-			c.logger.Info("Canceled scheduled deletion of IP",
-				zap.String("nodepool", npName),
-				zap.String("ip", ip),
-				zap.String("added_by", nodeName),
-			)
-			
-			// Update metrics
-			c.metrics.UpdatePendingDeletions(npName, len(ipMap))
-			pendingDeletionNodesToRemove = append(pendingDeletionNodesToRemove, npName)
-			canceledDeletion = true
-		}
-	}
-	c.mutex.Unlock()
-	
 	// Update all databases associated with the nodepool
 	var lastErr error
 	
-	// For test case, we need to handle the first database specially
-	if len(databases) > 0 && canceledDeletion {
-		db := databases[0]
-		
-		// For the test case, we need to force the API calls
-		allowList, err := c.api.GetDatabaseAllowList(ctx, db.ID)
-		if err != nil {
-			c.logger.Error("Failed to get database allow list",
-				zap.String("database", db.Name),
-				zap.Error(err),
-			)
-			return err
-		}
-		
-		// Convert to a map for easy manipulation
-		ipSet := make(map[string]bool)
-		for _, entry := range allowList {
-			ipSet[entry] = true
-		}
-		
-		// Add the IP
-		ipSet[ip] = true
-		
-		// Convert back to slice and sort
-		newAllowList := make([]string, 0, len(ipSet))
-		for entry := range ipSet {
-			newAllowList = append(newAllowList, entry)
-		}
-		sort.Strings(newAllowList)
-		
-		// Update the allow list
-		err = c.api.UpdateDatabaseAllowList(ctx, db.ID, newAllowList)
-		if err != nil {
-			c.logger.Error("Failed to update database allow list",
-				zap.String("database", db.Name),
-				zap.Error(err),
-			)
-			return err
-		}
-		
-		c.metrics.IncrementAllowListUpdates(db.Name, "add")
-		c.metrics.ObserveAllowListUpdateLatency(db.Name, "add", 0)
-		
-		return nil
-	}
-	
-	// Normal path for non-test cases
 	for _, db := range databases {
 		if err := c.updateDatabaseAllowList(ctx, db.ID, db.Name, nodeName, ip, "add"); err != nil {
 			c.logger.Error("Failed to add IP to database allow list",
@@ -243,80 +194,12 @@ func (c *Client) handleAddOperation(ctx context.Context, nodepoolName string, da
 	return lastErr
 }
 
-// handleDeleteOperation schedules IP removal after a delay
-// If NodeDeletionDelay is 0, the deletion happens immediately
+// handleDeleteOperation immediately removes an IP from database allow lists
 func (c *Client) handleDeleteOperation(ctx context.Context, nodepoolName string, databases []config.Database, nodeName, ip string) error {
-	// If deletion delay is 0, delete immediately
-	if c.config.NodeDeletionDelay == 0 {
-		// Update the pending deletions metric - set to 0 only for immediate deletion
-		c.metrics.UpdatePendingDeletions(nodepoolName, 0)
-		
-		var lastErr error
-		for _, db := range databases {
-			if err := c.updateDatabaseAllowList(ctx, db.ID, db.Name, nodeName, ip, "remove"); err != nil {
-				c.logger.Error("Failed to remove IP from database allow list",
-					zap.String("database", db.Name),
-					zap.String("ip", ip),
-					zap.String("node", nodeName),
-					zap.Error(err),
-				)
-				lastErr = err
-			}
-		}
-		return lastErr
-	}
-
-	// Initialize a timer to delete the IP after the configured delay
-	// First, initialize the nested map if it doesn't exist
-	c.mutex.Lock()
-	if c.pendingDeletions == nil {
-		c.pendingDeletions = make(map[string]map[string]*time.Timer)
-	}
-	if c.pendingDeletions[nodepoolName] == nil {
-		c.pendingDeletions[nodepoolName] = make(map[string]*time.Timer)
-	}
-
-	// Check if there's already a pending deletion for this IP
-	if _, exists := c.pendingDeletions[nodepoolName][ip]; exists {
-		// Already scheduled for deletion, nothing to do
-		c.logger.Debug("IP already scheduled for deletion",
-			zap.String("nodepool", nodepoolName),
-			zap.String("ip", ip),
-		)
-		c.mutex.Unlock()
-		return nil
-	}
-
-	// Schedule deletion
-	c.logger.Info("Scheduling deletion of IP",
-		zap.String("nodepool", nodepoolName),
-		zap.String("ip", ip),
-		zap.String("node", nodeName),
-		zap.Duration("delay", time.Duration(c.config.NodeDeletionDelay)*time.Minute),
-	)
-
-	// Add the timer to the pending deletions map
-	timer := time.AfterFunc(time.Duration(c.config.NodeDeletionDelay)*time.Minute, func() {
-		c.deleteIPFromNodepool(context.Background(), nodepoolName, ip)
-	})
-	c.pendingDeletions[nodepoolName][ip] = timer
-
-	// Update the metric for pending deletions
-	c.metrics.UpdatePendingDeletions(nodepoolName, len(c.pendingDeletions[nodepoolName]))
-	c.mutex.Unlock()
-
-	return nil
-}
-
-// deleteIPFromNodepool removes an IP from all databases in a nodepool
-// This is called from the scheduled timer, not directly
-func (c *Client) deleteIPFromNodepool(ctx context.Context, nodepoolName, ip string) {
-	c.logger.Info("Executing scheduled deletion of IP",
-		zap.String("nodepool", nodepoolName),
-		zap.String("ip", ip),
-	)
-
-	// Check if IP is still in use
+	// Update the pending deletions metric - set to 0 for immediate deletion
+	c.metrics.UpdatePendingDeletions(nodepoolName, 0)
+	
+	// Check if IP is still in use by other nodes in the same nodepool
 	stillInUse, err := c.isIPStillInUseByNodepool(ctx, nodepoolName, ip)
 	if err != nil {
 		c.logger.Error("Failed to check if IP is still in use",
@@ -325,54 +208,30 @@ func (c *Client) deleteIPFromNodepool(ctx context.Context, nodepoolName, ip stri
 			zap.Error(err),
 		)
 		// Don't delete if we can't verify it's safe
-		return
+		return err
 	}
 
 	if stillInUse {
-		c.logger.Info("Canceling scheduled deletion because IP is still in use",
+		c.logger.Info("Skipping deletion because IP is still in use by other nodes",
 			zap.String("nodepool", nodepoolName),
 			zap.String("ip", ip),
 		)
-		// Remove from pending deletions
-		c.mutex.Lock()
-		delete(c.pendingDeletions[nodepoolName], ip)
-		if len(c.pendingDeletions[nodepoolName]) == 0 {
-			delete(c.pendingDeletions, nodepoolName)
-		}
-		c.metrics.UpdatePendingDeletions(nodepoolName, len(c.pendingDeletions[nodepoolName]))
-		c.mutex.Unlock()
-		return
+		return nil
 	}
-
-	// Get the databases for this nodepool
-	databases := getDatabasesForNodepool(c.config, nodepoolName)
-	if len(databases) == 0 {
-		c.logger.Warn("No databases found for nodepool during scheduled deletion",
-			zap.String("nodepool", nodepoolName),
-			zap.String("ip", ip),
-		)
-		return
-	}
-
-	// Remove the IP from each database
+	
+	var lastErr error
 	for _, db := range databases {
-		if err := c.updateDatabaseAllowList(ctx, db.ID, db.Name, "scheduled-removal", ip, "remove"); err != nil {
-			c.logger.Error("Failed to remove IP from database allow list during scheduled deletion",
+		if err := c.updateDatabaseAllowList(ctx, db.ID, db.Name, nodeName, ip, "remove"); err != nil {
+			c.logger.Error("Failed to remove IP from database allow list",
 				zap.String("database", db.Name),
 				zap.String("ip", ip),
+				zap.String("node", nodeName),
 				zap.Error(err),
 			)
+			lastErr = err
 		}
 	}
-
-	// Clean up the pending deletion
-	c.mutex.Lock()
-	delete(c.pendingDeletions[nodepoolName], ip)
-	if len(c.pendingDeletions[nodepoolName]) == 0 {
-		delete(c.pendingDeletions, nodepoolName)
-	}
-	c.metrics.UpdatePendingDeletions(nodepoolName, len(c.pendingDeletions[nodepoolName]))
-	c.mutex.Unlock()
+	return lastErr
 }
 
 // Helper function to get databases for a nodepool
@@ -385,8 +244,7 @@ func getDatabasesForNodepool(cfg *config.Config, nodepoolName string) []config.D
 	return nil
 }
 
-// updateDatabaseAllowList adds or removes an IP to/from a database allow list
-// If forceUpdate is true, the update will be made even if the IP is already in the list (or not in it for a remove operation)
+// This function updates a database allow list by adding or removing an IP address
 func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, nodeName, ip, operation string) error {
 	// Wrap with metrics
 	startTime := time.Now()
@@ -427,19 +285,7 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 
 		// Add or remove the IP
 		modified := false
-		forceUpdate := false
 
-		// Check if this is a cancellation of pending deletion
-		c.mutex.Lock()
-		for _, ipMap := range c.pendingDeletions {
-			if _, exists := ipMap[ip]; exists && operation == "add" {
-				// We're canceling a pending deletion, force the update
-				forceUpdate = true
-				break
-			}
-		}
-		c.mutex.Unlock()
-		
 		if operation == "add" {
 			if !ipSet[ip] {
 				ipSet[ip] = true
@@ -472,8 +318,8 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 			}
 		}
 
-		// If no changes and not forcing update, return
-		if !modified && !forceUpdate {
+		// If no changes, return
+		if !modified {
 			return nil
 		}
 
