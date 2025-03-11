@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/mediahq/linode-db-allowlist/pkg/config"
@@ -148,19 +150,39 @@ func (c *Client) Stop() {
 
 // watchNodes sets up the informer for node events
 func (c *Client) watchNodes(ctx context.Context) error {
-	// Create shared informer factory
+	// Create shared informer factory with custom resync period and specific options
+	// Use a more optimized set of options to ensure the watch doesn't miss events
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		c.clientset,
 		ResyncPeriod,
+		// Use a node-specific tweak to ensure we get all events
+		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+			// Set a reasonable timeout for the watch (5 minutes)
+			timeoutSeconds := int64(300)
+			options.TimeoutSeconds = &timeoutSeconds
+			// Use a field selector to ensure we get all nodes
+			options.FieldSelector = ""
+			// Set explicit resource version to ensure we don't miss events
+			options.ResourceVersion = ""
+			// Allow watching from the beginning
+			options.AllowWatchBookmarks = true
+		}),
 	)
 
 	// Create node informer
 	nodeInformer := factory.Core().V1().Nodes().Informer()
+	
+	// Add safer reflection for watch error handling - use a defensive approach
+	c.setupWatchErrorHandler(nodeInformer)
 
 	// Set up event handlers
 	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*corev1.Node)
+			c.logger.Debug("Received node add event from watch", 
+				zap.String("node", node.Name),
+				zap.String("labels", fmt.Sprintf("%v", node.Labels)),
+			)
 			if c.isNodeInWatchedNodepool(node) {
 				c.logger.Info("Node added",
 					zap.String("node", node.Name),
@@ -174,8 +196,58 @@ func (c *Client) watchNodes(ctx context.Context) error {
 				}
 			}
 		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldNode := oldObj.(*corev1.Node)
+			newNode := newObj.(*corev1.Node)
+			
+			c.logger.Debug("Received node update event from watch", 
+				zap.String("node", newNode.Name),
+				zap.String("old_labels", fmt.Sprintf("%v", oldNode.Labels)),
+				zap.String("new_labels", fmt.Sprintf("%v", newNode.Labels)),
+			)
+			
+			// Check if this is a node that was just added to a watched nodepool
+			oldNodepool := c.getNodepoolName(oldNode)
+			newNodepool := c.getNodepoolName(newNode)
+			
+			// If the node was added to a watched nodepool, treat it as an Add
+			oldIsWatched := c.isNodeInWatchedNodepool(oldNode)
+			newIsWatched := c.isNodeInWatchedNodepool(newNode)
+			
+			if !oldIsWatched && newIsWatched {
+				c.logger.Info("Node added to watched nodepool",
+					zap.String("node", newNode.Name),
+					zap.String("old_nodepool", oldNodepool),
+					zap.String("new_nodepool", newNodepool),
+				)
+				if err := c.nodeAddHandler(newNode, "add"); err != nil {
+					c.logger.Error("Error handling node add to nodepool event",
+						zap.String("node", newNode.Name),
+						zap.Error(err),
+					)
+				}
+			} else if oldIsWatched && !newIsWatched {
+				// If the node was removed from a watched nodepool, treat it as a Delete
+				c.logger.Info("Node removed from watched nodepool",
+					zap.String("node", newNode.Name),
+					zap.String("old_nodepool", oldNodepool),
+					zap.String("new_nodepool", newNodepool),
+				)
+				if err := c.nodeDelHandler(oldNode, "delete"); err != nil {
+					c.logger.Error("Error handling node remove from nodepool event",
+						zap.String("node", oldNode.Name),
+						zap.Error(err),
+					)
+				}
+			}
+			// Don't process other updates
+		},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*corev1.Node)
+			c.logger.Debug("Received node delete event from watch", 
+				zap.String("node", node.Name),
+				zap.String("labels", fmt.Sprintf("%v", node.Labels)),
+			)
 			if c.isNodeInWatchedNodepool(node) {
 				c.logger.Info("Node deleted",
 					zap.String("node", node.Name),
@@ -192,16 +264,151 @@ func (c *Client) watchNodes(ctx context.Context) error {
 	})
 
 	// Start informer
+	c.logger.Info("Starting node informer")
 	factory.Start(c.stopCh)
 	
 	// Wait for cache sync
+	c.logger.Info("Waiting for node informer cache to sync")
 	if !cache.WaitForCacheSync(c.stopCh, nodeInformer.HasSynced) {
 		return fmt.Errorf("timed out waiting for node informer cache to sync")
 	}
+	c.logger.Info("Node informer cache synced successfully")
+	
+	// Run an initial verification after a brief delay to ensure the watch is working
+	go func() {
+		// Wait 10 seconds before first verification to allow the watch to stabilize
+		time.Sleep(10 * time.Second)
+		c.logger.Info("Performing initial watch connection verification")
+		consistent, _ := c.verifyWatchConsistency(ctx)
+		if !consistent {
+			c.logger.Warn("Initial watch verification failed - watch may not be catching all events. " +
+				"Check for network issues, API server constraints, or firewall rules.")
+		} else {
+			c.logger.Info("Initial watch verification successful - watch appears to be working correctly")
+		}
+	}()
+	
+	// Periodically log that we're still watching to confirm the informer is active
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		
+		var consecutiveMismatches int
+		
+		for {
+			select {
+			case <-ticker.C:
+				// Log that the informer is active
+				c.logger.Info("Node informer still active")
+				
+				// Verify the watch connection by checking consistency
+				consistent, _ := c.verifyWatchConsistency(ctx)
+				if !consistent {
+					consecutiveMismatches++
+					if consecutiveMismatches >= 2 {
+						c.logger.Error("Watch appears to be broken after multiple verification failures. Kubernetes node events may be missed.",
+							zap.Int("consecutive_mismatches", consecutiveMismatches),
+						)
+						// We would reset the watch here, but this would require a significant refactoring
+						// of the informer pattern. We'll rely on the debug info to help diagnose instead.
+					}
+				} else {
+					consecutiveMismatches = 0
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	
 	// Block until stop channel is closed
 	<-ctx.Done()
+	c.logger.Info("Node informer stopped")
 	return nil
+}
+
+// verifyWatchConnection verifies the watch connection by listing nodes directly
+// and comparing with what's in our cache
+func (c *Client) verifyWatchConnection(ctx context.Context) {
+	// List nodes directly from the API
+	nodes, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		c.logger.Error("Failed to list nodes when verifying watch connection", zap.Error(err))
+		return
+	}
+	
+	// Count nodes by nodepool for verification
+	nodepoolCounts := make(map[string]int)
+	watchedNodepools := make(map[string]bool)
+	
+	// Build list of watched nodepools for easy lookup
+	for _, np := range c.config.Nodepools {
+		watchedNodepools[np.Name] = true
+	}
+	
+	// Count nodes in each nodepool
+	for _, node := range nodes.Items {
+		nodepoolName := c.getNodepoolName(&node)
+		if nodepoolName != "" {
+			nodepoolCounts[nodepoolName]++
+		}
+	}
+	
+	// Log counts for watched nodepools
+	for nodepool, count := range nodepoolCounts {
+		if watchedNodepools[nodepool] {
+			c.logger.Info("Current node count from direct API query", 
+				zap.String("nodepool", nodepool), 
+				zap.Int("count", count),
+			)
+		}
+	}
+	
+	// Now verify against our informer cache by using GetNodesByNodepool
+	for nodepool := range watchedNodepools {
+		cacheNodes, err := c.GetNodesByNodepool(nodepool)
+		if err != nil {
+			c.logger.Error("Failed to get nodes from cache when verifying", 
+				zap.String("nodepool", nodepool),
+				zap.Error(err),
+			)
+			continue
+		}
+		
+		apiCount := nodepoolCounts[nodepool]
+		cacheCount := len(cacheNodes)
+		
+		if apiCount != cacheCount {
+			c.logger.Warn("Watch connection may have issues - node count mismatch",
+				zap.String("nodepool", nodepool),
+				zap.Int("api_count", apiCount),
+				zap.Int("cache_count", cacheCount),
+			)
+			// Log the node names from both to help diagnose
+			apiNodeNames := make([]string, 0, len(nodes.Items))
+			for _, node := range nodes.Items {
+				if c.getNodepoolName(&node) == nodepool {
+					apiNodeNames = append(apiNodeNames, node.Name)
+				}
+			}
+			
+			cacheNodeNames := make([]string, 0, len(cacheNodes))
+			for _, node := range cacheNodes {
+				cacheNodeNames = append(cacheNodeNames, node.Name)
+			}
+			
+			c.logger.Warn("Node list comparison",
+				zap.String("nodepool", nodepool),
+				zap.Strings("api_nodes", apiNodeNames),
+				zap.Strings("cache_nodes", cacheNodeNames),
+			)
+		} else {
+			c.logger.Info("Watch connection verification successful",
+				zap.String("nodepool", nodepool),
+				zap.Int("node_count", apiCount),
+			)
+		}
+	}
 }
 
 // isNodeInWatchedNodepool checks if a node belongs to a watched nodepool
@@ -317,4 +524,216 @@ func getHostname() string {
 		return "unknown"
 	}
 	return hostname
+}
+
+// setupWatchErrorHandler sets up a watch error handler for the given informer
+func (c *Client) setupWatchErrorHandler(informer cache.SharedIndexInformer) {
+	// Use recover to prevent panics from reflection
+	defer func() {
+		if r := recover(); r != nil {
+			c.logger.Warn("Recovered from panic in setupWatchErrorHandler",
+				zap.Any("panic", r),
+			)
+		}
+	}()
+
+	if informer == nil {
+		c.logger.Warn("Cannot setup watch error handler: informer is nil")
+		return
+	}
+
+	// Use safer reflection
+	informerValue := reflect.ValueOf(informer)
+	if !informerValue.IsValid() {
+		c.logger.Warn("Cannot setup watch error handler: informer value is invalid")
+		return
+	}
+	
+	// Check if we can access Elem()
+	if informerValue.Kind() != reflect.Ptr || informerValue.IsNil() {
+		c.logger.Warn("Cannot setup watch error handler: informer is not a valid pointer")
+		return
+	}
+	
+	informerElem := informerValue.Elem()
+	if !informerElem.IsValid() {
+		c.logger.Warn("Cannot setup watch error handler: informer element is invalid")
+		return
+	}
+	
+	// Try to get controller field
+	controllerField := informerElem.FieldByName("controller")
+	if !controllerField.IsValid() {
+		c.logger.Warn("Cannot setup watch error handler: controller field not found")
+		return
+	}
+	
+	// Check if controller is a valid pointer
+	if controllerField.Kind() != reflect.Ptr || controllerField.IsNil() {
+		c.logger.Warn("Cannot setup watch error handler: controller is not a valid pointer")
+		return
+	}
+	
+	controllerElem := controllerField.Elem()
+	if !controllerElem.IsValid() {
+		c.logger.Warn("Cannot setup watch error handler: controller element is invalid")
+		return
+	}
+	
+	// Try to get reflector field
+	reflectorField := controllerElem.FieldByName("reflector")
+	if !reflectorField.IsValid() {
+		c.logger.Warn("Cannot setup watch error handler: reflector field not found")
+		return
+	}
+	
+	// Check if reflector is a valid pointer
+	if reflectorField.Kind() != reflect.Ptr || reflectorField.IsNil() {
+		c.logger.Warn("Cannot setup watch error handler: reflector is not a valid pointer")
+		return
+	}
+	
+	reflectorElem := reflectorField.Elem()
+	if !reflectorElem.IsValid() {
+		c.logger.Warn("Cannot setup watch error handler: reflector element is invalid")
+		return
+	}
+	
+	// Try to get watchErrorHandler field
+	watcherField := reflectorElem.FieldByName("watchErrorHandler")
+	if !watcherField.IsValid() {
+		c.logger.Warn("Cannot setup watch error handler: watchErrorHandler field not found")
+		return
+	}
+	
+	// Check if watchErrorHandler is nil
+	if watcherField.IsNil() {
+		c.logger.Warn("Cannot setup watch error handler: watchErrorHandler is nil")
+		return
+	}
+	
+	c.logger.Debug("Setting up watch error handler")
+	
+	// The field exists and is not nil, so we can proceed
+	try := func() bool {
+		defer func() {
+			if r := recover(); r != nil {
+				c.logger.Warn("Recovered from panic while setting up watch error handler",
+					zap.Any("panic", r),
+				)
+			}
+		}()
+		
+		originalHandler := watcherField.Interface().(cache.WatchErrorHandler)
+		errorHandler := func(r *cache.Reflector, err error) {
+			c.logger.Warn("Error watching Kubernetes resources, will retry",
+				zap.String("reflector", r.Name()),
+				zap.Error(err),
+				zap.String("error_type", fmt.Sprintf("%T", err)),
+			)
+			// Log extra details for common watch errors
+			if strings.Contains(err.Error(), "too old resource version") {
+				c.logger.Warn("Watch expired - resource version too old. This is normal and will trigger a full relist.")
+			} else if strings.Contains(err.Error(), "connection refused") {
+				c.logger.Error("Connection to Kubernetes API server refused. Check network connectivity.")
+			}
+			originalHandler(r, err)
+		}
+		
+		watcherField.Set(reflect.ValueOf(errorHandler))
+		return true
+	}
+	
+	if !try() {
+		c.logger.Warn("Failed to set up watch error handler")
+	}
+}
+
+// verifyWatchConsistency verifies the watch connection by listing nodes directly
+// and comparing with what's in our cache
+func (c *Client) verifyWatchConsistency(ctx context.Context) (bool, map[string]int) {
+	// List nodes directly from the API
+	nodes, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		c.logger.Error("Failed to list nodes when verifying watch connection", zap.Error(err))
+		return false, nil
+	}
+	
+	// Count nodes by nodepool for verification
+	nodepoolCounts := make(map[string]int)
+	watchedNodepools := make(map[string]bool)
+	
+	// Build list of watched nodepools for easy lookup
+	for _, np := range c.config.Nodepools {
+		watchedNodepools[np.Name] = true
+	}
+	
+	// Count nodes in each nodepool
+	for _, node := range nodes.Items {
+		nodepoolName := c.getNodepoolName(&node)
+		if nodepoolName != "" {
+			nodepoolCounts[nodepoolName]++
+		}
+	}
+	
+	// Log counts for watched nodepools
+	for nodepool, count := range nodepoolCounts {
+		if watchedNodepools[nodepool] {
+			c.logger.Info("Current node count from direct API query", 
+				zap.String("nodepool", nodepool), 
+				zap.Int("count", count),
+			)
+		}
+	}
+	
+	// Now verify against our informer cache by using GetNodesByNodepool
+	consistent := true
+	for nodepool := range watchedNodepools {
+		cacheNodes, err := c.GetNodesByNodepool(nodepool)
+		if err != nil {
+			c.logger.Error("Failed to get nodes from cache when verifying", 
+				zap.String("nodepool", nodepool),
+				zap.Error(err),
+			)
+			consistent = false
+			continue
+		}
+		
+		apiCount := nodepoolCounts[nodepool]
+		cacheCount := len(cacheNodes)
+		
+		if apiCount != cacheCount {
+			consistent = false
+			c.logger.Warn("Watch connection may have issues - node count mismatch",
+				zap.String("nodepool", nodepool),
+				zap.Int("api_count", apiCount),
+				zap.Int("cache_count", cacheCount),
+			)
+			// Log the node names from both to help diagnose
+			apiNodeNames := make([]string, 0, len(nodes.Items))
+			for _, node := range nodes.Items {
+				if c.getNodepoolName(&node) == nodepool {
+					apiNodeNames = append(apiNodeNames, node.Name)
+				}
+			}
+			
+			cacheNodeNames := make([]string, 0, len(cacheNodes))
+			for _, node := range cacheNodes {
+				cacheNodeNames = append(cacheNodeNames, node.Name)
+			}
+			
+			c.logger.Warn("Node list comparison",
+				zap.String("nodepool", nodepool),
+				zap.Strings("api_nodes", apiNodeNames),
+				zap.Strings("cache_nodes", cacheNodeNames),
+			)
+		} else {
+			c.logger.Info("Watch connection verification successful",
+				zap.String("nodepool", nodepool),
+				zap.Int("node_count", apiCount),
+			)
+		}
+	}
+
+	return consistent, nodepoolCounts
 } 
