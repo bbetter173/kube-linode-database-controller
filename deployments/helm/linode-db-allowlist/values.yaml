@@ -36,6 +36,14 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
+## Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  # Minimum number of pods that must be available after eviction
+  minAvailable: 1
+  # Alternative to minAvailable, maximum number of pods that can be unavailable after eviction
+  # maxUnavailable: 1
+
 ## Application Configuration
 config:
   # Log level (debug, info, warn, error)

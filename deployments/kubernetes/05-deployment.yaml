@@ -74,3 +74,18 @@ spec:
       - name: config
         configMap:
           name: linode-db-allowlist-config 
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: linode-db-allowlist
+  namespace: linode-db-allowlist
+  labels:
+    app.kubernetes.io/name: linode-db-allowlist
+    app.kubernetes.io/part-of: linode-db-allowlist
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: linode-db-allowlist
+  minAvailable: 1 
