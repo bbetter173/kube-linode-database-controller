@@ -140,7 +140,7 @@ func handleNodeEvent(
 	cfg *config.Config,
 ) error {
 	nodeName := node.Name
-	nodepoolName := node.Labels[kubernetes.NodePoolLabelKey]
+	nodepoolName := k8sClient.GetNodepoolLabelValue(node)
 	
 	// Start timer for metrics
 	startTime := time.Now()

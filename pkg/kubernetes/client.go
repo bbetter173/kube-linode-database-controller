@@ -181,7 +181,7 @@ func (c *Client) watchNodes(ctx context.Context) error {
 			if c.isNodeInWatchedNodepool(node) {
 				c.logger.Info("Node added",
 					zap.String("node", node.Name),
-					zap.String("nodepool", c.getNodepoolName(node)),
+					zap.String("nodepool", c.getNodepoolLabelValue(node)),
 				)
 				if err := c.nodeAddHandler(node, "add"); err != nil {
 					c.logger.Error("Error handling node add event",
@@ -202,8 +202,8 @@ func (c *Client) watchNodes(ctx context.Context) error {
 			)
 			
 			// Check if this is a node that was just added to or removed from a watched nodepool
-			oldNodepool := c.getNodepoolName(oldNode)
-			newNodepool := c.getNodepoolName(newNode)
+			oldNodepool := c.getNodepoolLabelValue(oldNode)
+			newNodepool := c.getNodepoolLabelValue(newNode)
 			
 			// If the node was added to a watched nodepool, treat it as an Add
 			oldIsWatched := c.isNodeInWatchedNodepool(oldNode)
@@ -271,7 +271,7 @@ func (c *Client) watchNodes(ctx context.Context) error {
 			if c.isNodeInWatchedNodepool(node) {
 				c.logger.Info("Node deleted",
 					zap.String("node", node.Name),
-					zap.String("nodepool", c.getNodepoolName(node)),
+					zap.String("nodepool", c.getNodepoolLabelValue(node)),
 				)
 				if err := c.nodeDelHandler(node, "delete"); err != nil {
 					c.logger.Error("Error handling node delete event",
@@ -368,7 +368,7 @@ func (c *Client) verifyWatchConnection(ctx context.Context) {
 	
 	// Count nodes in each nodepool
 	for _, node := range nodes.Items {
-		nodepoolName := c.getNodepoolName(&node)
+		nodepoolName := c.getNodepoolLabelValue(&node)
 		if nodepoolName != "" {
 			nodepoolCounts[nodepoolName]++
 		}
@@ -407,7 +407,7 @@ func (c *Client) verifyWatchConnection(ctx context.Context) {
 			// Log the node names from both to help diagnose
 			apiNodeNames := make([]string, 0, len(nodes.Items))
 			for _, node := range nodes.Items {
-				if c.getNodepoolName(&node) == nodepool {
+				if c.getNodepoolLabelValue(&node) == nodepool {
 					apiNodeNames = append(apiNodeNames, node.Name)
 				}
 			}
@@ -433,7 +433,7 @@ func (c *Client) verifyWatchConnection(ctx context.Context) {
 
 // isNodeInWatchedNodepool checks if a node belongs to a watched nodepool
 func (c *Client) isNodeInWatchedNodepool(node *corev1.Node) bool {
-	nodepoolName := c.getNodepoolName(node)
+	nodepoolName := c.getNodepoolLabelValue(node)
 	if nodepoolName == "" {
 		return false
 	}
@@ -448,13 +448,19 @@ func (c *Client) isNodeInWatchedNodepool(node *corev1.Node) bool {
 	return false
 }
 
-// getNodepoolName extracts the nodepool name from a node
-func (c *Client) getNodepoolName(node *corev1.Node) string {
+// getNodepoolLabelValue extracts the nodepool label value from a node
+func (c *Client) getNodepoolLabelValue(node *corev1.Node) string {
 	if node == nil || node.Labels == nil {
 		return ""
 	}
 	
 	return node.Labels[c.config.NodepoolLabelKey]
+}
+
+// GetNodepoolLabelValue is an exported version of getNodepoolLabelValue
+// It returns the value of the configured nodepool label key for the given node
+func (c *Client) GetNodepoolLabelValue(node *corev1.Node) string {
+	return c.getNodepoolLabelValue(node)
 }
 
 // GetExternalIP gets the external IP address of a node
@@ -567,7 +573,7 @@ func (c *Client) verifyWatchConsistency(ctx context.Context) (bool, map[string]i
 	
 	// Count nodes in each nodepool
 	for _, node := range nodes.Items {
-		nodepoolName := c.getNodepoolName(&node)
+		nodepoolName := c.getNodepoolLabelValue(&node)
 		if nodepoolName != "" {
 			nodepoolCounts[nodepoolName]++
 		}
@@ -609,7 +615,7 @@ func (c *Client) verifyWatchConsistency(ctx context.Context) (bool, map[string]i
 			// Log the node names from both to help diagnose
 			apiNodeNames := make([]string, 0, len(nodes.Items))
 			for _, node := range nodes.Items {
-				if c.getNodepoolName(&node) == nodepool {
+				if c.getNodepoolLabelValue(&node) == nodepool {
 					apiNodeNames = append(apiNodeNames, node.Name)
 				}
 			}

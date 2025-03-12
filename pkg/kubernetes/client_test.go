@@ -89,7 +89,7 @@ func TestGetNodepoolName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pool := client.getNodepoolName(tt.node)
+			pool := client.getNodepoolLabelValue(tt.node)
 			assert.Equal(t, tt.expectedPool, pool)
 		})
 	}
@@ -592,8 +592,8 @@ func TestNodeUpdateWithLabelChange(t *testing.T) {
 			newNode := newObj.(*corev1.Node)
 			
 			// Check if node was added to or removed from a watched nodepool
-			oldNodepool := client.getNodepoolName(oldNode)
-			newNodepool := client.getNodepoolName(newNode)
+			oldNodepool := client.getNodepoolLabelValue(oldNode)
+			newNodepool := client.getNodepoolLabelValue(newNode)
 			
 			oldIsWatched := client.isNodeInWatchedNodepool(oldNode)
 			newIsWatched := client.isNodeInWatchedNodepool(newNode)
