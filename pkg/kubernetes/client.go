@@ -42,18 +42,23 @@ type NodeHandler func(node *corev1.Node, eventType string) error
 
 // Client manages Kubernetes connectivity and node watching
 type Client struct {
-	clientset      *kubernetes.Clientset
-	logger         *zap.Logger
-	config         *config.Config
-	nodeAddHandler NodeHandler
-	nodeDelHandler NodeHandler
-	stopCh         chan struct{}
-	leaseLockName  string
+	clientset         *kubernetes.Clientset
+	logger            *zap.Logger
+	config            *config.Config
+	metricsClient     interface{
+		SetLeaderStatus(bool)
+	}
+	nodeAddHandler    NodeHandler
+	nodeDelHandler    NodeHandler
+	stopCh            chan struct{}
+	leaseLockName     string
 	leaseLockNamespace string
 }
 
 // NewClient creates a new Kubernetes client
-func NewClient(logger *zap.Logger, cfg *config.Config, kubeconfigPath string, leaseLockName, leaseLockNamespace string) (*Client, error) {
+func NewClient(logger *zap.Logger, cfg *config.Config, kubeconfigPath string, leaseLockName, leaseLockNamespace string, metricsClient interface{
+	SetLeaderStatus(bool)
+}) (*Client, error) {
 	var kubeConfig *rest.Config
 	var err error
 
@@ -79,11 +84,12 @@ func NewClient(logger *zap.Logger, cfg *config.Config, kubeconfigPath string, le
 	}
 
 	return &Client{
-		clientset:      clientset,
-		logger:         logger,
-		config:         cfg,
-		stopCh:         make(chan struct{}),
-		leaseLockName:  leaseLockName,
+		clientset:         clientset,
+		logger:            logger,
+		config:            cfg,
+		metricsClient:     metricsClient,
+		stopCh:            make(chan struct{}),
+		leaseLockName:     leaseLockName,
 		leaseLockNamespace: leaseLockNamespace,
 	}, nil
 }
@@ -122,17 +128,27 @@ func (c *Client) Start(ctx context.Context) error {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				c.logger.Info("Started leading, watching nodes")
+				if c.metricsClient != nil {
+					c.metricsClient.SetLeaderStatus(true)
+				}
 				if err := c.watchNodes(ctx); err != nil {
 					c.logger.Error("Error watching nodes", zap.Error(err))
 				}
 			},
 			OnStoppedLeading: func() {
 				c.logger.Info("Stopped leading")
+				if c.metricsClient != nil {
+					c.metricsClient.SetLeaderStatus(false)
+				}
 				close(c.stopCh)
 			},
 			OnNewLeader: func(identity string) {
 				if identity != getHostname() {
 					c.logger.Info("New leader elected", zap.String("leader", identity))
+					// If we're not the leader, ensure our status is set to false
+					if c.metricsClient != nil {
+						c.metricsClient.SetLeaderStatus(false)
+					}
 				}
 			},
 		},

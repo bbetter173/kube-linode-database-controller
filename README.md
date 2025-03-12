@@ -60,8 +60,8 @@ retry:
 # Log level (debug, info, warn, error, default: info)
 logLevel: "info"
 
-# Label key used to identify node pools (default: mediahq.switch.tv/nodepool)
-nodepoolLabelKey: "mediahq.switch.tv/nodepool"
+# Label key used to identify node pools (default: lke.linode.com/pool-id)
+nodepoolLabelKey: "lke.linode.com/pool-id"
 ```
 
 ### Environment Variables
@@ -71,7 +71,7 @@ The following environment variables can be used to configure the application:
 - `LINODE_TOKEN`: Linode API token (required)
 - `API_RATE_LIMIT`: API rate limit in requests per minute (default: 100)
 - `LOG_LEVEL`: Log level (debug, info, warn, error, default: info)
-- `NODEPOOL_LABEL_KEY`: Label key used to identify node pools (default: mediahq.switch.tv/nodepool)
+- `NODEPOOL_LABEL_KEY`: Label key used to identify node pools (default: lke.linode.com/pool-id)
 
 ### Command Line Flags
 

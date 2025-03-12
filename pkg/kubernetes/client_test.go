@@ -453,15 +453,26 @@ type MockClient struct {
 	mockClientset *fake.Clientset
 }
 
-// NewMockClient creates a new mock client for testing
+// Add a mock metrics client type
+type MockMetricsClient struct {
+	mock.Mock
+}
+
+func (m *MockMetricsClient) SetLeaderStatus(isLeader bool) {
+	m.Called(isLeader)
+}
+
+// Update the NewMockClient function
 func NewMockClient(t *testing.T, cfg *config.Config) *MockClient {
 	logger := zaptest.NewLogger(t)
 	mockClientset := fake.NewSimpleClientset()
+	mockMetrics := &MockMetricsClient{}
 	
 	client := &Client{
 		// We won't set clientset directly to avoid type conflicts
 		logger: logger,
 		config: cfg,
+		metricsClient: mockMetrics,
 		stopCh: make(chan struct{}),
 		leaseLockName: "test-lease",
 		leaseLockNamespace: "test-namespace",

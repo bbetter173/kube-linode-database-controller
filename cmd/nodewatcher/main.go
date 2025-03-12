@@ -86,7 +86,7 @@ func main() {
 	}()
 	
 	// Create Kubernetes client
-	k8sClient, err := kubernetes.NewClient(logger, cfg, *kubeconfig, LeaseLockName, LeaseLockNamespace)
+	k8sClient, err := kubernetes.NewClient(logger, cfg, *kubeconfig, LeaseLockName, LeaseLockNamespace, metricsClient)
 	if err != nil {
 		logger.Fatal("Failed to create Kubernetes client", zap.Error(err))
 	}
