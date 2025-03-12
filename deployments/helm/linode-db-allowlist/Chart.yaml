@@ -1,15 +1,9 @@
 apiVersion: v2
-name: linode-db-allowlist
+name: kube-linode-database-controller
 description: A Helm chart for Linode Database Allow List Manager
 type: application
 version: 0.1.0
 appVersion: "1.0.0"
-
-annotations:
-  artifacthub.io/license: MIT
-  artifacthub.io/prerelease: "false"
-  artifacthub.io/changes: |
-    - Initial release of the Helm chart
   
 keywords:
   - linode
@@ -19,5 +13,5 @@ keywords:
   - ip-management
 
 maintainers:
-  - name: MediaHQ
-    url: https://github.com/mediahq/linode-db-allowlist 
+  - name: Ben Bettridge
+    url: https://github.com/bbetter173/kube-linode-database-controller 
