@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "linode-db-allowlist.fullname" . }}-config
+  labels:
+    {{- include "linode-db-allowlist.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    # Configuration for the Linode Database Allow List Manager
+    
+    # Nodepool to database mappings
+    nodepools:
+    {{- range .Values.config.nodepools }}
+      - name: {{ .name | quote }}
+        databases:
+        {{- range .databases }}
+          - id: {{ .id | quote }}
+            name: {{ .name | quote }}
+        {{- end }}
+    {{- end }}
+    
+    # API rate limit (requests per minute)
+    apiRateLimit: {{ .Values.config.apiRateLimit }}
+    
+    # Retry configuration
+    retry:
+      maxAttempts: {{ .Values.config.retry.maxAttempts }}
+      initialBackoff: {{ .Values.config.retry.initialBackoff }}
+      maxBackoff: {{ .Values.config.retry.maxBackoff }}
+    
+    # Log level
+    logLevel: {{ .Values.config.logLevel | quote }}
+    
+    # Nodepool label key
+    nodepoolLabelKey: {{ .Values.config.nodepoolLabelKey | quote }} 

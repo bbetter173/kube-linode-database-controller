@@ -1,0 +1,22 @@
+{{- if .Values.metrics.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "linode-db-allowlist.fullname" . }}
+  labels:
+    {{- include "linode-db-allowlist.labels" . | nindent 4 }}
+    {{- if .Values.metrics.serviceMonitor.enabled }}
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ .Values.service.port }}"
+    prometheus.io/path: "/metrics"
+    {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "linode-db-allowlist.selectorLabels" . | nindent 4 }}
+{{- end }} 

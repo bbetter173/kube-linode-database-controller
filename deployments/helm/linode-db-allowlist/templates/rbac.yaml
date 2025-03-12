@@ -1,0 +1,36 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "linode-db-allowlist.fullname" . }}
+  labels:
+    {{- include "linode-db-allowlist.labels" . | nindent 4 }}
+rules:
+  # Access to watch nodes
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  # Access to create events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Access to manage leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "linode-db-allowlist.fullname" . }}
+  labels:
+    {{- include "linode-db-allowlist.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "linode-db-allowlist.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "linode-db-allowlist.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }} 

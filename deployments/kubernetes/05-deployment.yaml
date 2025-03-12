@@ -28,7 +28,7 @@ spec:
       serviceAccountName: linode-db-allowlist
       containers:
       - name: nodewatcher
-        image: linode-db-allowlist:latest  # Replace with your actual image
+        image: ghcr.io/bbetter173/kube-linode-database-controller:latest  # Replace with your actual image
         imagePullPolicy: Always
         args:
         - "--config=/etc/linode-db-allowlist/config.yaml"

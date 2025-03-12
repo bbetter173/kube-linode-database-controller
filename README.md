@@ -17,7 +17,7 @@ This Go application watches for Kubernetes Node Create/Delete events and updates
 
 ## Requirements
 
-- Go 1.21 or higher
+- Go 1.23 or higher
 - Access to a Kubernetes cluster (v1.30+)
 - Linode API token with appropriate permissions
 - Kubernetes RBAC permissions to watch nodes
@@ -63,6 +63,26 @@ logLevel: "info"
 # Label key used to identify node pools (default: lke.linode.com/pool-id)
 nodepoolLabelKey: "lke.linode.com/pool-id"
 ```
+
+## Helm Chart
+
+This repository includes a Helm chart for easy deployment to Kubernetes clusters. The chart is published to GitHub Pages and can be installed using Helm.
+
+### Installing the Chart
+
+```bash
+# Add the repository
+helm repo add bbetter173 https://bbetter173.github.io/kube-linode-database-controller/deployments/helm/charts
+
+# Update the local repository cache
+helm repo update
+
+# Install the chart
+helm install linode-db-allowlist bbetter173/linode-db-allowlist \
+  --set linode.token.value=your-linode-api-token
+```
+
+For more detailed information about the Helm chart, see the [chart documentation](./deployments/helm/linode-db-allowlist/README.md).
 
 ### Environment Variables
 

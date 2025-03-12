@@ -1,0 +1,107 @@
+## Global Configuration
+nameOverride: ""
+fullnameOverride: ""
+
+## Image Configuration
+image:
+  repository: mediahq/linode-db-allowlist
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to Chart.appVersion
+
+## Deployment Configuration
+replicaCount: 2
+imagePullSecrets: []
+
+## Pod Configuration
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+
+## Service Configuration
+service:
+  type: ClusterIP
+  port: 8080
+
+## Resources Configuration
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+## Node Selector, Affinity, and Tolerations
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+## Application Configuration
+config:
+  # Log level (debug, info, warn, error)
+  logLevel: "info"
+  
+  # Nodepool label key (default: lke.linode.com/pool-id)
+  nodepoolLabelKey: "lke.linode.com/pool-id"
+  
+  # API rate limit (requests per minute)
+  apiRateLimit: 100
+  
+  # Retry configuration
+  retry:
+    maxAttempts: 5
+    initialBackoff: 1s
+    maxBackoff: 30s
+  
+  # Nodepool to database mappings
+  nodepools:
+    - name: "production"
+      databases:
+        - id: "123456"
+          name: "production-db"
+    - name: "staging"
+      databases:
+        - id: "789012"
+          name: "staging-db"
+
+## Linode API Token
+linode:
+  token:
+    # You should provide the token via a Secret
+    existingSecret: ""  # Name of existing Secret
+    secretKey: "LINODE_TOKEN"  # Key in the Secret
+    # Or you can provide it directly (not recommended for production)
+    value: ""
+
+## Metrics Configuration
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    additionalLabels: {}
+    interval: 15s
+    scrapeTimeout: 5s
+
+## Health Configuration
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+## RBAC Configuration
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {} 

@@ -1,0 +1,28 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+To access the metrics endpoint:
+
+{{- if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "linode-db-allowlist.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT/metrics
+{{- else if contains "LoadBalancer" .Values.service.type }}
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+        You can watch the status with: kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "linode-db-allowlist.fullname" . }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "linode-db-allowlist.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.service.port }}/metrics
+{{- else if contains "ClusterIP" .Values.service.type }}
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "linode-db-allowlist.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  echo "Visit http://127.0.0.1:{{ .Values.service.port }}/metrics to access the metrics endpoint"
+{{- end }}
+
+To view the logs:
+  kubectl logs --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "linode-db-allowlist.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+Configuration:
+  - The application is watching for nodes with the label key: {{ .Values.config.nodepoolLabelKey }}
+  - Log level is set to: {{ .Values.config.logLevel }}
+  - API rate limit is set to: {{ .Values.config.apiRateLimit }} requests per minute
+  - Configured nodepools: {{ range .Values.config.nodepools }}{{ .name }}, {{ end }} 
