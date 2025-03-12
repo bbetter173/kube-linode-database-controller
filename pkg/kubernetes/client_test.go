@@ -34,7 +34,7 @@ func createTestNode(name, nodepool string, addresses []corev1.NodeAddress) *core
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				"mediahq.switch.tv/nodepool": nodepool,
+				"lke.linode.com/pool-id": nodepool,
 			},
 		},
 		Status: corev1.NodeStatus{
@@ -46,7 +46,7 @@ func createTestNode(name, nodepool string, addresses []corev1.NodeAddress) *core
 func TestGetNodepoolName(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	cfg := &config.Config{
-		NodepoolLabelKey: "mediahq.switch.tv/nodepool",
+		NodepoolLabelKey: "lke.linode.com/pool-id",
 	}
 	
 	client := &Client{
@@ -65,7 +65,7 @@ func TestGetNodepoolName(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-node",
 					Labels: map[string]string{
-						"mediahq.switch.tv/nodepool": "production",
+						"lke.linode.com/pool-id": "production",
 					},
 				},
 			},
@@ -131,7 +131,7 @@ func TestGetNodesByNodepool(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Define the nodepool label key for testing
-	nodepoolLabelKey := "mediahq.switch.tv/nodepool"
+	nodepoolLabelKey := "lke.linode.com/pool-id"
 	
 	// Create a custom implementation for GetNodesByNodepool to work with the fake clientset
 	getNodesByNodepool := func(nodepoolName string) ([]*corev1.Node, error) {
@@ -308,7 +308,7 @@ func TestOnNodeAdded(t *testing.T) {
 	client := &Client{
 		logger: logger,
 		config: &config.Config{
-			NodepoolLabelKey: "mediahq.switch.tv/nodepool",
+			NodepoolLabelKey: "lke.linode.com/pool-id",
 			Nodepools: []config.Nodepool{
 				{
 					Name: "production",
@@ -370,7 +370,7 @@ func TestOnNodeDeleted(t *testing.T) {
 	
 	// Create config for the test
 	cfg := &config.Config{
-		NodepoolLabelKey: "mediahq.switch.tv/nodepool",
+		NodepoolLabelKey: "lke.linode.com/pool-id",
 		Nodepools: []config.Nodepool{
 			{
 				Name: "production",
@@ -547,7 +547,7 @@ func TestNodeUpdateWithLabelChange(t *testing.T) {
 
 	// Create config for the test
 	cfg := &config.Config{
-		NodepoolLabelKey: "mediahq.switch.tv/nodepool",
+		NodepoolLabelKey: "lke.linode.com/pool-id",
 		Nodepools: []config.Nodepool{
 			{
 				Name: "production",
@@ -640,7 +640,7 @@ func TestNodeUpdateWithLabelChange(t *testing.T) {
 				Name: "test-node-1",
 				Labels: map[string]string{
 					"other-label": "value",
-					"mediahq.switch.tv/nodepool": "production",
+					"lke.linode.com/pool-id": "production",
 				},
 			},
 		}
@@ -669,7 +669,7 @@ func TestNodeUpdateWithLabelChange(t *testing.T) {
 				Name: "test-node-2",
 				Labels: map[string]string{
 					"other-label": "value",
-					"mediahq.switch.tv/nodepool": "production",
+					"lke.linode.com/pool-id": "production",
 				},
 			},
 		}
@@ -707,7 +707,7 @@ func TestNodeUpdateWithLabelChange(t *testing.T) {
 				Name: "test-node-3",
 				Labels: map[string]string{
 					"other-label": "value",
-					"mediahq.switch.tv/nodepool": "production",
+					"lke.linode.com/pool-id": "production",
 				},
 			},
 		}
@@ -717,7 +717,7 @@ func TestNodeUpdateWithLabelChange(t *testing.T) {
 				Name: "test-node-3",
 				Labels: map[string]string{
 					"other-label": "value",
-					"mediahq.switch.tv/nodepool": "staging",
+					"lke.linode.com/pool-id": "staging",
 				},
 			},
 		}
@@ -747,7 +747,7 @@ func TestNodeUpdateWithLabelChange(t *testing.T) {
 				Name: "test-node-4",
 				Labels: map[string]string{
 					"other-label": "value",
-					"mediahq.switch.tv/nodepool": "production",
+					"lke.linode.com/pool-id": "production",
 				},
 			},
 		}
@@ -757,7 +757,7 @@ func TestNodeUpdateWithLabelChange(t *testing.T) {
 				Name: "test-node-4",
 				Labels: map[string]string{
 					"other-label": "value",
-					"mediahq.switch.tv/nodepool": "other",
+					"lke.linode.com/pool-id": "other",
 				},
 			},
 		}

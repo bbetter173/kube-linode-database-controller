@@ -46,7 +46,7 @@ func DefaultConfig() *Config {
 		Nodepools:         []Nodepool{},
 		APIRateLimit:      100,
 		LogLevel:          "info", // Default log level
-		NodepoolLabelKey:  "mediahq.switch.tv/nodepool", // Default label key
+		NodepoolLabelKey:  "lke.linode.com/pool-id", // Default label key
 		Retry: RetryConfig{
 			MaxAttempts:    5,
 			InitialBackoff: time.Second,

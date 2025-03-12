@@ -24,7 +24,7 @@ import (
 
 const (
 	// NodePoolLabelKey is the label key used to identify node pools
-	NodePoolLabelKey = "mediahq.switch.tv/nodepool"
+	NodePoolLabelKey = "lke.linode.com/pool-id"
 	
 	// ResyncPeriod is how often the informer does a full resync
 	ResyncPeriod = 30 * time.Minute
