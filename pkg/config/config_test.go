@@ -22,6 +22,9 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Empty(t, cfg.Nodepools)
 	assert.Empty(t, cfg.LinodeToken)
 	assert.Equal(t, "info", cfg.LogLevel)
+	assert.Equal(t, "lke.linode.com/pool-id", cfg.NodepoolLabelKey)
+	assert.Equal(t, true, cfg.EnableIPv4)
+	assert.Equal(t, false, cfg.EnableIPv6)
 }
 
 // TestValidate tests the configuration validation logic
@@ -40,19 +43,18 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
 				Retry: RetryConfig{
-					MaxAttempts:    3,
-					InitialBackoff: 1 * time.Millisecond,
-					MaxBackoff:     5 * time.Millisecond,
+					MaxAttempts:    5,
+					InitialBackoff:  time.Second,
+					MaxBackoff:      30 * time.Second,
 				},
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "test-db-name",
-							},
+							{ID: "123", Name: "test-db"},
 						},
 					},
 				},
@@ -62,17 +64,21 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Missing Linode token",
 			config: Config{
-				APIRateLimit:     100,
-				LogLevel:         "info",
-				NodepoolLabelKey: "lke.linode.com/pool-id",
+				LinodeToken:  "",
+				APIRateLimit: 100,
+				LogLevel:     "info",
+				EnableIPv4:   true,
+				EnableIPv6:   false,
+				Retry: RetryConfig{
+					MaxAttempts:    5,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
+				},
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "test-db-name",
-							},
+							{ID: "123", Name: "test-db"},
 						},
 					},
 				},
@@ -83,10 +89,17 @@ func TestValidate(t *testing.T) {
 		{
 			name: "No nodepools",
 			config: Config{
-				LinodeToken:      "test-token",
-				APIRateLimit:     100,
-				LogLevel:         "info",
-				NodepoolLabelKey: "lke.linode.com/pool-id",
+				LinodeToken:  "test-token",
+				APIRateLimit: 100,
+				LogLevel:     "info",
+				EnableIPv4:   true,
+				EnableIPv6:   false,
+				Retry: RetryConfig{
+					MaxAttempts:    5,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
+				},
+				Nodepools: []Nodepool{},
 			},
 			expectError: true,
 			errorMsg:    "at least one nodepool must be configured",
@@ -95,17 +108,21 @@ func TestValidate(t *testing.T) {
 			name: "Invalid API rate limit",
 			config: Config{
 				LinodeToken:      "test-token",
-				APIRateLimit:     -5,
+				APIRateLimit:     0,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
+				Retry: RetryConfig{
+					MaxAttempts:    5,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
+				},
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "test-db-name",
-							},
+							{ID: "123", Name: "test-db"},
 						},
 					},
 				},
@@ -120,19 +137,18 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
 				Retry: RetryConfig{
 					MaxAttempts:    0,
-					InitialBackoff: 1 * time.Millisecond,
-					MaxBackoff:     5 * time.Millisecond,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
 				},
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "test-db-name",
-							},
+							{ID: "123", Name: "test-db"},
 						},
 					},
 				},
@@ -147,19 +163,18 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
 				Retry: RetryConfig{
-					MaxAttempts:    3,
-					InitialBackoff: -1 * time.Millisecond,
-					MaxBackoff:     5 * time.Millisecond,
+					MaxAttempts:    5,
+					InitialBackoff: -1 * time.Second,
+					MaxBackoff:       30 * time.Second,
 				},
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "test-db-name",
-							},
+							{ID: "123", Name: "test-db"},
 						},
 					},
 				},
@@ -174,19 +189,18 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
 				Retry: RetryConfig{
-					MaxAttempts:    3,
-					InitialBackoff: 10 * time.Millisecond,
-					MaxBackoff:     5 * time.Millisecond,
+					MaxAttempts:    5,
+					InitialBackoff: 10 * time.Second,
+					MaxBackoff:     5 * time.Second,
 				},
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "test-db-name",
-							},
+							{ID: "123", Name: "test-db"},
 						},
 					},
 				},
@@ -201,14 +215,18 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
+				Retry: RetryConfig{
+					MaxAttempts:    5,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
+				},
 				Nodepools: []Nodepool{
 					{
 						Name: "",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "test-db-name",
-							},
+							{ID: "123", Name: "test-db"},
 						},
 					},
 				},
@@ -223,6 +241,13 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
+				Retry: RetryConfig{
+					MaxAttempts:    5,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
+				},
 				Nodepools: []Nodepool{
 					{
 						Name:      "production",
@@ -240,14 +265,18 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
+				Retry: RetryConfig{
+					MaxAttempts:    5,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
+				},
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "",
-								Name: "test-db-name",
-							},
+							{ID: "", Name: "test-db"},
 						},
 					},
 				},
@@ -262,14 +291,18 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
+				Retry: RetryConfig{
+					MaxAttempts:    5,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
+				},
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "",
-							},
+							{ID: "123", Name: ""},
 						},
 					},
 				},
@@ -284,8 +317,10 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "lke.linode.com/pool-id",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
 				Retry: RetryConfig{
-					MaxAttempts:    3,
+					MaxAttempts:    5,
 					InitialBackoff: 0,
 					MaxBackoff:     0,
 				},
@@ -293,10 +328,7 @@ func TestValidate(t *testing.T) {
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "test-db-name",
-							},
+							{ID: "123", Name: "test-db"},
 						},
 					},
 				},
@@ -310,20 +342,50 @@ func TestValidate(t *testing.T) {
 				APIRateLimit:     100,
 				LogLevel:         "info",
 				NodepoolLabelKey: "",
+				EnableIPv4:       true,
+				EnableIPv6:       false,
+				Retry: RetryConfig{
+					MaxAttempts:    5,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
+				},
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
 						Databases: []Database{
-							{
-								ID:   "test-db",
-								Name: "test-db-name",
-							},
+							{ID: "123", Name: "test-db"},
 						},
 					},
 				},
 			},
 			expectError: true,
 			errorMsg:    "nodepool label key cannot be empty",
+		},
+		{
+			name: "IP version validation",
+			config: Config{
+				LinodeToken:      "test-token",
+				APIRateLimit:     100,
+				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
+				Retry: RetryConfig{
+					MaxAttempts:    5,
+					InitialBackoff:   time.Second,
+					MaxBackoff:       30 * time.Second,
+				},
+				Nodepools: []Nodepool{
+					{
+						Name: "test-nodepool",
+						Databases: []Database{
+							{ID: "123", Name: "test-db"},
+						},
+					},
+				},
+				EnableIPv4:   false,
+				EnableIPv6:   false,
+			},
+			expectError: true,
+			errorMsg:    "at least one IP version (IPv4 or IPv6) must be enabled",
 		},
 	}
 
@@ -343,31 +405,41 @@ func TestValidate(t *testing.T) {
 
 // Test loading configuration directly from environment variables
 func TestLoadFromEnv(t *testing.T) {
-	// Set up environment variables
-	os.Setenv("LINODE_TOKEN", "test-token")
+	// Save and restore environment
+	oldToken := os.Getenv("LINODE_TOKEN")
+	oldRateLimit := os.Getenv("API_RATE_LIMIT")
+	oldLogLevel := os.Getenv("LOG_LEVEL")
+	oldNodepoolLabelKey := os.Getenv("NODEPOOL_LABEL_KEY")
+	oldEnableIPv4 := os.Getenv("ENABLE_IPV4")
+	oldEnableIPv6 := os.Getenv("ENABLE_IPV6")
+	
+	defer func() {
+		os.Setenv("LINODE_TOKEN", oldToken)
+		os.Setenv("API_RATE_LIMIT", oldRateLimit)
+		os.Setenv("LOG_LEVEL", oldLogLevel)
+		os.Setenv("NODEPOOL_LABEL_KEY", oldNodepoolLabelKey)
+		os.Setenv("ENABLE_IPV4", oldEnableIPv4)
+		os.Setenv("ENABLE_IPV6", oldEnableIPv6)
+	}()
+	
+	// Set environment variables
+	os.Setenv("LINODE_TOKEN", "env-token")
 	os.Setenv("API_RATE_LIMIT", "200")
 	os.Setenv("LOG_LEVEL", "debug")
+	os.Setenv("NODEPOOL_LABEL_KEY", "custom.key/nodepool")
+	os.Setenv("ENABLE_IPV4", "false")
+	os.Setenv("ENABLE_IPV6", "true")
 	
-	// Cleanup
-	defer func() {
-		os.Unsetenv("LINODE_TOKEN")
-		os.Unsetenv("API_RATE_LIMIT")
-		os.Unsetenv("LOG_LEVEL")
-	}()
-
-	// Load from environment
+	// Load config from environment
 	cfg := LoadFromEnv()
-
-	// Verify expected values
-	assert.Equal(t, "test-token", cfg.LinodeToken)
+	
+	// Verify settings
+	assert.Equal(t, "env-token", cfg.LinodeToken)
 	assert.Equal(t, 200, cfg.APIRateLimit)
 	assert.Equal(t, "debug", cfg.LogLevel)
-	
-	// Verify other values fall back to defaults
-	defaultCfg := DefaultConfig()
-	assert.Equal(t, defaultCfg.Retry.MaxAttempts, cfg.Retry.MaxAttempts)
-	assert.Equal(t, defaultCfg.Retry.InitialBackoff, cfg.Retry.InitialBackoff)
-	assert.Equal(t, defaultCfg.Retry.MaxBackoff, cfg.Retry.MaxBackoff)
+	assert.Equal(t, "custom.key/nodepool", cfg.NodepoolLabelKey)
+	assert.Equal(t, false, cfg.EnableIPv4)
+	assert.Equal(t, true, cfg.EnableIPv6)
 }
 
 // Test loading environment variables with invalid values

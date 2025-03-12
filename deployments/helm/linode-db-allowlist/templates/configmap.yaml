@@ -32,4 +32,8 @@ data:
     logLevel: {{ .Values.config.logLevel | quote }}
     
     # Nodepool label key
-    nodepoolLabelKey: {{ .Values.config.nodepoolLabelKey | quote }} 
+    nodepoolLabelKey: {{ .Values.config.nodepoolLabelKey | quote }}
+    
+    # IP version settings
+    enableIPv4: {{ .Values.config.enableIPv4 }}
+    enableIPv6: {{ .Values.config.enableIPv6 }} 

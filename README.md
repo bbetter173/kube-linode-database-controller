@@ -7,6 +7,7 @@ This Go application watches for Kubernetes Node Create/Delete events and updates
 - Uses the client-go informer framework to watch for Node Create/Delete events
 - Configurable label key for nodepool identification (defaults to 'lke.linode.com/pool-id')
 - Updates Linode Managed Database allow_lists with node external IPs
+- Supports IPv4, IPv6, or both IP versions for node address tracking
 - Supports mapping between nodepool values and multiple databases
 - Never removes existing IP addresses from database allow_lists
 - Displays warnings when 0.0.0.0/0 is detected in an allow_list
@@ -31,6 +32,19 @@ The application now watches for node updates in addition to node additions and d
 - When a node's label changes from one watched nodepool to another, its IP is removed from the old nodepool's database allow lists and added to the new ones.
 
 The label key is configurable via the `nodepoolLabelKey` configuration option, environment variable `NODEPOOL_LABEL_KEY`, or command line flag `--nodepool-label-key`.
+
+## IP Version Support
+
+The application can be configured to track IPv4 addresses, IPv6 addresses, or both:
+
+- By default, only IPv4 addresses are tracked and added to database allow lists
+- When both are enabled, both types of addresses will be added to database allow lists
+- At least one IP version must be enabled
+
+IP version settings can be configured via:
+- Configuration file settings `enableIPv4` and `enableIPv6`
+- Environment variables `ENABLE_IPV4` and `ENABLE_IPV6` (values: "true" or "false")
+- Helm chart values (see chart documentation)
 
 ## Configuration
 
@@ -62,6 +76,10 @@ logLevel: "info"
 
 # Label key used to identify node pools (default: lke.linode.com/pool-id)
 nodepoolLabelKey: "lke.linode.com/pool-id"
+
+# IP version configuration (default: IPv4 only)
+enableIPv4: true
+enableIPv6: false
 ```
 
 ## Helm Chart
@@ -92,6 +110,8 @@ The following environment variables can be used to configure the application:
 - `API_RATE_LIMIT`: API rate limit in requests per minute (default: 100)
 - `LOG_LEVEL`: Log level (debug, info, warn, error, default: info)
 - `NODEPOOL_LABEL_KEY`: Label key used to identify node pools (default: lke.linode.com/pool-id)
+- `ENABLE_IPV4`: Whether to track IPv4 addresses (default: true)
+- `ENABLE_IPV6`: Whether to track IPv6 addresses (default: false)
 
 ### Command Line Flags
 

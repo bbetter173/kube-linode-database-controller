@@ -52,6 +52,10 @@ config:
   # Nodepool label key (default: lke.linode.com/pool-id)
   nodepoolLabelKey: "lke.linode.com/pool-id"
   
+  # IP address version configuration
+  enableIPv4: true  # Whether to include IPv4 addresses in allow lists
+  enableIPv6: false # Whether to include IPv6 addresses in allow lists
+  
   # API rate limit (requests per minute)
   apiRateLimit: 100
   
