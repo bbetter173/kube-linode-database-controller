@@ -3,6 +3,25 @@ entries:
   kube-linode-database-controller:
   - apiVersion: v2
     appVersion: 1.0.0
+    created: "2025-03-12T09:31:16.129358028Z"
+    description: A Helm chart for Linode Database Allow List Manager
+    digest: d8edca96cf9b6144d091230cd5da72b4dc9bc868080a9ec2dcc71ec2581c8d81
+    keywords:
+    - linode
+    - database
+    - kubernetes
+    - allow-list
+    - ip-management
+    maintainers:
+    - name: Ben Bettridge
+      url: https://github.com/bbetter173/kube-linode-database-controller
+    name: kube-linode-database-controller
+    type: application
+    urls:
+    - https://github.com/bbetter173/kube-linode-database-controller/releases/download/kube-linode-database-controller-0.1.2/kube-linode-database-controller-0.1.2.tgz
+    version: 0.1.2
+  - apiVersion: v2
+    appVersion: 1.0.0
     created: "2025-03-12T05:53:25.100742004Z"
     description: A Helm chart for Linode Database Allow List Manager
     digest: e407bc28be511f2e65aa991b91e5eb0f67b32851a16c8baee86e9290283008c0
@@ -64,4 +83,4 @@ entries:
     urls:
     - https://github.com/bbetter173/kube-linode-database-controller/releases/download/linode-db-allowlist-0.1.0/linode-db-allowlist-0.1.0.tgz
     version: 0.1.0
-generated: "2025-03-12T05:53:25.100750349Z"
+generated: "2025-03-12T09:31:16.129372204Z"
