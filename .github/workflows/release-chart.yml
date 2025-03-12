@@ -48,16 +48,3 @@ jobs:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         with:
           charts_dir: deployments/helm
-
-      - name: Update Helm chart repository index
-        run: |
-          mkdir -p .cr-release-packages
-          helm repo index --url https://bbetter173.github.io/kube-linode-database-controller/deployments/helm/charts .cr-release-packages/
-          mv .cr-release-packages/index.yaml index.yaml
-
-      - name: Push to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: .cr-release-packages
-          destination_dir: .
