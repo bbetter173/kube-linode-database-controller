@@ -5,7 +5,7 @@ This Go application watches for Kubernetes Node Create/Delete events and updates
 ## Features
 
 - Uses the client-go informer framework to watch for Node Create/Delete events
-- Configurable label key for nodepool identification (defaults to 'mediahq.switch.tv/nodepool')
+- Configurable label key for nodepool identification (defaults to 'lke.linode.com/pool-id')
 - Updates Linode Managed Database allow_lists with node external IPs
 - Supports mapping between nodepool values and multiple databases
 - Never removes existing IP addresses from database allow_lists
