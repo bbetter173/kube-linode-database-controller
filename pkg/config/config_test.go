@@ -39,6 +39,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Retry: RetryConfig{
 					MaxAttempts:    3,
 					InitialBackoff: 1 * time.Millisecond,
@@ -63,6 +64,7 @@ func TestValidate(t *testing.T) {
 			config: Config{
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
@@ -84,6 +86,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 			},
 			expectError: true,
 			errorMsg:    "at least one nodepool must be configured",
@@ -94,6 +97,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     -5,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
@@ -115,6 +119,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Retry: RetryConfig{
 					MaxAttempts:    0,
 					InitialBackoff: 1 * time.Millisecond,
@@ -141,6 +146,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Retry: RetryConfig{
 					MaxAttempts:    3,
 					InitialBackoff: -1 * time.Millisecond,
@@ -167,6 +173,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Retry: RetryConfig{
 					MaxAttempts:    3,
 					InitialBackoff: 10 * time.Millisecond,
@@ -193,6 +200,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Nodepools: []Nodepool{
 					{
 						Name: "",
@@ -214,6 +222,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Nodepools: []Nodepool{
 					{
 						Name:      "production",
@@ -230,6 +239,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
@@ -251,6 +261,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Nodepools: []Nodepool{
 					{
 						Name: "production",
@@ -272,6 +283,7 @@ func TestValidate(t *testing.T) {
 				LinodeToken:      "test-token",
 				APIRateLimit:     100,
 				LogLevel:         "info",
+				NodepoolLabelKey: "lke.linode.com/pool-id",
 				Retry: RetryConfig{
 					MaxAttempts:    3,
 					InitialBackoff: 0,
@@ -290,6 +302,28 @@ func TestValidate(t *testing.T) {
 				},
 			},
 			expectError: false,
+		},
+		{
+			name: "Empty nodepool label key",
+			config: Config{
+				LinodeToken:      "test-token",
+				APIRateLimit:     100,
+				LogLevel:         "info",
+				NodepoolLabelKey: "",
+				Nodepools: []Nodepool{
+					{
+						Name: "production",
+						Databases: []Database{
+							{
+								ID:   "test-db",
+								Name: "test-db-name",
+							},
+						},
+					},
+				},
+			},
+			expectError: true,
+			errorMsg:    "nodepool label key cannot be empty",
 		},
 	}
 
