@@ -47,4 +47,4 @@ jobs:
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         with:
-          charts_dir: deployments/helm
+          charts_dir: deployments/helm  
