@@ -1,4 +1,5 @@
-FROM golang:1.23.7 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.23.7 AS builder
+
 
 WORKDIR /app
 
@@ -9,8 +10,10 @@ RUN go mod download
 # Copy the source code
 COPY . .
 
+ARG TARGETOS TARGETARCH
+
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o nodewatcher ./cmd/nodewatcher
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o nodewatcher ./cmd/nodewatcher
 
 # Use a small alpine image for the final container
 FROM alpine:3.18

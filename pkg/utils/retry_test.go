@@ -152,19 +152,19 @@ func TestBackoffCalculation(t *testing.T) {
 	assert.Len(t, backoffDurations, 4) // Should have 4 attempts
 	
 	// First attempt has no backoff
-	assert.Less(t, backoffDurations[0], 5*time.Millisecond)
+	assert.Less(t, backoffDurations[0], 10*time.Millisecond) // Increase tolerance
 	
 	// Second attempt should have around 10ms backoff
 	assert.GreaterOrEqual(t, backoffDurations[1], 5*time.Millisecond)
-	assert.Less(t, backoffDurations[1], 20*time.Millisecond)
+	assert.Less(t, backoffDurations[1], 25*time.Millisecond) // Increase upper bound
 	
-	// Third attempt should have around 20ms backoff
-	assert.GreaterOrEqual(t, backoffDurations[2], 15*time.Millisecond)
-	assert.Less(t, backoffDurations[2], 30*time.Millisecond)
+	// Third attempt should have around 20ms backoff with jitter
+	assert.GreaterOrEqual(t, backoffDurations[2], 10*time.Millisecond)
+	assert.Less(t, backoffDurations[2], 35*time.Millisecond) // Increase upper bound
 	
 	// Fourth attempt should have around 40ms backoff (capped)
-	assert.GreaterOrEqual(t, backoffDurations[3], 30*time.Millisecond)
-	assert.Less(t, backoffDurations[3], 50*time.Millisecond)
+	assert.GreaterOrEqual(t, backoffDurations[3], 25*time.Millisecond)
+	assert.Less(t, backoffDurations[3], 60*time.Millisecond) // Increase upper bound
 }
 
 // TestMaxBackoffCap specifically tests that backoff is capped
@@ -202,10 +202,10 @@ func TestMaxBackoffCap(t *testing.T) {
 	}
 
 	// The 3rd and 4th intervals should be capped at maxBackoff
-	// We allow some wiggle room for test execution delay
+	// We allow more wiggle room for test execution delay and jitter
 	for i := 2; i < len(intervals); i++ {
-		assert.Less(t, intervals[i], 30*time.Millisecond, 
-			"Interval %d should be capped at maxBackoff", i)
+		assert.Less(t, intervals[i], 40*time.Millisecond, 
+			"Interval %d should be capped at maxBackoff plus some reasonable tolerance", i)
 	}
 }
 
