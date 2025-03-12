@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"reflect"
-	"strings"
 	"time"
 
 	"github.com/mediahq/linode-db-allowlist/pkg/config"
@@ -171,9 +169,6 @@ func (c *Client) watchNodes(ctx context.Context) error {
 
 	// Create node informer
 	nodeInformer := factory.Core().V1().Nodes().Informer()
-	
-	// Add safer reflection for watch error handling - use a defensive approach
-	c.setupWatchErrorHandler(nodeInformer)
 
 	// Set up event handlers
 	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -549,129 +544,6 @@ func getHostname() string {
 		return "unknown"
 	}
 	return hostname
-}
-
-// setupWatchErrorHandler sets up a watch error handler for the given informer
-func (c *Client) setupWatchErrorHandler(informer cache.SharedIndexInformer) {
-	// Use recover to prevent panics from reflection
-	defer func() {
-		if r := recover(); r != nil {
-			c.logger.Warn("Recovered from panic in setupWatchErrorHandler",
-				zap.Any("panic", r),
-			)
-		}
-	}()
-
-	if informer == nil {
-		c.logger.Warn("Cannot setup watch error handler: informer is nil")
-		return
-	}
-
-	// Use safer reflection
-	informerValue := reflect.ValueOf(informer)
-	if !informerValue.IsValid() {
-		c.logger.Warn("Cannot setup watch error handler: informer value is invalid")
-		return
-	}
-	
-	// Check if we can access Elem()
-	if informerValue.Kind() != reflect.Ptr || informerValue.IsNil() {
-		c.logger.Warn("Cannot setup watch error handler: informer is not a valid pointer")
-		return
-	}
-	
-	informerElem := informerValue.Elem()
-	if !informerElem.IsValid() {
-		c.logger.Warn("Cannot setup watch error handler: informer element is invalid")
-		return
-	}
-	
-	// Try to get controller field
-	controllerField := informerElem.FieldByName("controller")
-	if !controllerField.IsValid() {
-		c.logger.Warn("Cannot setup watch error handler: controller field not found")
-		return
-	}
-	
-	// Check if controller is a valid pointer
-	if controllerField.Kind() != reflect.Ptr || controllerField.IsNil() {
-		c.logger.Warn("Cannot setup watch error handler: controller is not a valid pointer")
-		return
-	}
-	
-	controllerElem := controllerField.Elem()
-	if !controllerElem.IsValid() {
-		c.logger.Warn("Cannot setup watch error handler: controller element is invalid")
-		return
-	}
-	
-	// Try to get reflector field
-	reflectorField := controllerElem.FieldByName("reflector")
-	if !reflectorField.IsValid() {
-		c.logger.Warn("Cannot setup watch error handler: reflector field not found")
-		return
-	}
-	
-	// Check if reflector is a valid pointer
-	if reflectorField.Kind() != reflect.Ptr || reflectorField.IsNil() {
-		c.logger.Warn("Cannot setup watch error handler: reflector is not a valid pointer")
-		return
-	}
-	
-	reflectorElem := reflectorField.Elem()
-	if !reflectorElem.IsValid() {
-		c.logger.Warn("Cannot setup watch error handler: reflector element is invalid")
-		return
-	}
-	
-	// Try to get watchErrorHandler field
-	watcherField := reflectorElem.FieldByName("watchErrorHandler")
-	if !watcherField.IsValid() {
-		c.logger.Warn("Cannot setup watch error handler: watchErrorHandler field not found")
-		return
-	}
-	
-	// Check if watchErrorHandler is nil
-	if watcherField.IsNil() {
-		c.logger.Warn("Cannot setup watch error handler: watchErrorHandler is nil")
-		return
-	}
-	
-	c.logger.Debug("Setting up watch error handler")
-	
-	// The field exists and is not nil, so we can proceed
-	try := func() bool {
-		defer func() {
-			if r := recover(); r != nil {
-				c.logger.Warn("Recovered from panic while setting up watch error handler",
-					zap.Any("panic", r),
-				)
-			}
-		}()
-		
-		originalHandler := watcherField.Interface().(cache.WatchErrorHandler)
-		errorHandler := func(r *cache.Reflector, err error) {
-			c.logger.Warn("Error watching Kubernetes resources, will retry",
-				zap.String("reflector", r.Name()),
-				zap.Error(err),
-				zap.String("error_type", fmt.Sprintf("%T", err)),
-			)
-			// Log extra details for common watch errors
-			if strings.Contains(err.Error(), "too old resource version") {
-				c.logger.Warn("Watch expired - resource version too old. This is normal and will trigger a full relist.")
-			} else if strings.Contains(err.Error(), "connection refused") {
-				c.logger.Error("Connection to Kubernetes API server refused. Check network connectivity.")
-			}
-			originalHandler(r, err)
-		}
-		
-		watcherField.Set(reflect.ValueOf(errorHandler))
-		return true
-	}
-	
-	if !try() {
-		c.logger.Warn("Failed to set up watch error handler")
-	}
 }
 
 // verifyWatchConsistency verifies the watch connection by listing nodes directly
