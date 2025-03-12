@@ -38,6 +38,9 @@ type Config struct {
 	Retry             RetryConfig `yaml:"retry"`
 	LogLevel          string      `yaml:"logLevel"` // Log level (debug, info, warn, error)
 	NodepoolLabelKey  string      `yaml:"nodepoolLabelKey"` // Label key used to identify node pools
+	// IP version configuration
+	EnableIPv4        bool        `yaml:"enableIPv4"` // Whether to include IPv4 addresses in allow lists
+	EnableIPv6        bool        `yaml:"enableIPv6"` // Whether to include IPv6 addresses in allow lists
 }
 
 // DefaultConfig returns a configuration with reasonable defaults
@@ -47,6 +50,8 @@ func DefaultConfig() *Config {
 		APIRateLimit:      100,
 		LogLevel:          "info", // Default log level
 		NodepoolLabelKey:  "lke.linode.com/pool-id", // Default label key
+		EnableIPv4:        true,  // Default to IPv4 enabled
+		EnableIPv6:        false, // Default to IPv6 disabled
 		Retry: RetryConfig{
 			MaxAttempts:    5,
 			InitialBackoff: time.Second,
@@ -92,6 +97,15 @@ func LoadFromEnv() *Config {
 	
 	if val := os.Getenv("NODEPOOL_LABEL_KEY"); val != "" {
 		config.NodepoolLabelKey = val
+	}
+
+	// Handle IP version settings from environment variables
+	if val := os.Getenv("ENABLE_IPV4"); val != "" {
+		config.EnableIPv4 = strings.ToLower(val) == "true"
+	}
+	
+	if val := os.Getenv("ENABLE_IPV6"); val != "" {
+		config.EnableIPv6 = strings.ToLower(val) == "true"
 	}
 
 	return config
@@ -145,6 +159,15 @@ func Load(configPath string) (*Config, error) {
 		config.NodepoolLabelKey = val
 	}
 
+	// Handle IP version settings from environment variables
+	if val := os.Getenv("ENABLE_IPV4"); val != "" {
+		config.EnableIPv4 = strings.ToLower(val) == "true"
+	}
+	
+	if val := os.Getenv("ENABLE_IPV6"); val != "" {
+		config.EnableIPv6 = strings.ToLower(val) == "true"
+	}
+
 	// Validate the final configuration
 	if err := config.Validate(); err != nil {
 		return nil, err
@@ -180,6 +203,11 @@ func (c *Config) Validate() error {
 	// Validate nodepool label key
 	if c.NodepoolLabelKey == "" {
 		return fmt.Errorf("nodepool label key cannot be empty")
+	}
+
+	// Ensure at least one IP version is enabled
+	if !c.EnableIPv4 && !c.EnableIPv6 {
+		return fmt.Errorf("at least one IP version (IPv4 or IPv6) must be enabled")
 	}
 
 	for _, nodepool := range c.Nodepools {

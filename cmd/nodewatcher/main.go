@@ -152,10 +152,10 @@ func handleNodeEvent(
 		metricsClient.IncrementNodeDeletes(nodepoolName)
 	}
 	
-	// Get external IP address
-	ip, err := k8sClient.GetExternalIP(node)
+	// Get external IP addresses
+	ips, err := k8sClient.GetExternalIPs(node)
 	if err != nil {
-		logger.Error("Failed to get external IP for node",
+		logger.Error("Failed to get external IPs for node",
 			zap.String("node", nodeName),
 			zap.String("nodepool", nodepoolName),
 			zap.Error(err),
@@ -164,47 +164,74 @@ func handleNodeEvent(
 		return err
 	}
 	
-	// Update database allow lists
-	logger.Info("Updating database allow lists",
+	logger.Info("Retrieved node IP addresses",
 		zap.String("node", nodeName),
-		zap.String("nodepool", nodepoolName),
-		zap.String("ip", ip),
+		zap.Strings("ips", ips),
 		zap.String("operation", eventType),
 	)
 	
-	err = linodeClient.UpdateAllowList(context.Background(), nodepoolName, nodeName, ip, eventType)
-	if err != nil {
-		logger.Error("Failed to update database allow lists",
+	// Process all IPs
+	var lastErr error
+	
+	for _, ip := range ips {
+		// Update database allow lists
+		logger.Info("Updating database allow lists",
 			zap.String("node", nodeName),
 			zap.String("nodepool", nodepoolName),
 			zap.String("ip", ip),
 			zap.String("operation", eventType),
-			zap.Error(err),
 		)
 		
-		// Update metrics
-		errorType := "api_error"
-		if strings.Contains(err.Error(), "no databases configured") {
-			errorType = "configuration_error"
+		ipErr := linodeClient.UpdateAllowList(context.Background(), nodepoolName, nodeName, ip, eventType)
+		if ipErr != nil {
+			logger.Error("Failed to update database allow lists for IP",
+				zap.String("node", nodeName),
+				zap.String("nodepool", nodepoolName),
+				zap.String("ip", ip),
+				zap.String("operation", eventType),
+				zap.Error(ipErr),
+			)
+			
+			// Update metrics
+			errorType := "api_error"
+			if strings.Contains(ipErr.Error(), "no databases configured") {
+				errorType = "configuration_error"
+			}
+			metricsClient.IncrementNodeProcessingErrors(nodepoolName, eventType, errorType)
+			
+			// Store the error to return later
+			lastErr = ipErr
+			
+			// Continue processing other IPs even if one fails
+			continue
 		}
-		metricsClient.IncrementNodeProcessingErrors(nodepoolName, eventType, errorType)
 		
-		// Log Kubernetes event
-		eventReason := "AllowListUpdateFailed"
-		message := fmt.Sprintf("Failed to update database allow lists: %v", err)
-		k8sClient.LogEvent(nodeName, "Warning", eventReason, message)
-		
-		return err
+		// Log success for this IP
+		logger.Info("Successfully processed IP",
+			zap.String("node", nodeName),
+			zap.String("nodepool", nodepoolName),
+			zap.String("ip", ip),
+			zap.String("operation", eventType),
+		)
 	}
 	
 	// Calculate processing duration for metrics
 	duration := time.Since(startTime).Seconds()
 	
+	// Only log a Kubernetes event if there was an error
+	if lastErr != nil {
+		eventReason := "AllowListUpdateFailed"
+		message := fmt.Sprintf("Failed to update database allow lists for some IPs: %v", lastErr)
+		k8sClient.LogEvent(nodeName, "Warning", eventReason, message)
+		
+		return lastErr
+	}
+	
 	// Log success
 	logger.Info("Successfully processed node event",
 		zap.String("node", nodeName),
 		zap.String("nodepool", nodepoolName),
-		zap.String("ip", ip),
+		zap.Strings("ips", ips),
 		zap.String("operation", eventType),
 		zap.Float64("duration_seconds", duration),
 	)
@@ -213,9 +240,9 @@ func handleNodeEvent(
 	eventReason := "AllowListUpdated"
 	var message string
 	if eventType == "add" {
-		message = fmt.Sprintf("Added node IP %s to database allow lists", ip)
+		message = fmt.Sprintf("Added node IPs %v to database allow lists", ips)
 	} else {
-		message = fmt.Sprintf("Scheduled removal of node IP %s from database allow lists", ip)
+		message = fmt.Sprintf("Scheduled removal of node IPs %v from database allow lists", ips)
 	}
 	k8sClient.LogEvent(nodeName, "Normal", eventReason, message)
 	
