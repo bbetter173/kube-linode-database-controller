@@ -1,7 +1,0 @@
-owner: bbetter173
-git-base-url: https://github.com
-git-upload-url: https://github.com
-index-path: ./index.yaml
-package-path: ./.cr-release-packages
-release-name-template: "{{ .Name }}-{{ .Version }}"
-commit-message-template: "Helm chart release {{ .Name }}-{{ .Version }}" 

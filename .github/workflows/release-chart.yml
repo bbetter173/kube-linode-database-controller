@@ -14,7 +14,6 @@ on:
 permissions:
   contents: write
   packages: read
-  issues: write
 
 jobs:
   release:
@@ -44,12 +43,11 @@ jobs:
           helm repo update
 
       - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.0
+        uses: helm/chart-releaser-action@v1.7.0
         env:
-          CR_TOKEN: "${{ secrets.CR_TOKEN }}"
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         with:
           charts_dir: deployments/helm
-          config: .github/cr-config.yml
 
       - name: Update Helm chart repository index
         run: |
@@ -62,4 +60,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: .cr-release-packages
-          destination_dir: deployments/helm/charts 
+          destination_dir: .
