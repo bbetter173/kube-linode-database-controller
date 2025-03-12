@@ -4,9 +4,9 @@ fullnameOverride: ""
 
 ## Image Configuration
 image:
-  repository: mediahq/linode-db-allowlist
+  repository: ghcr.io/bbetter173/kube-linode-database-controller
   pullPolicy: IfNotPresent
-  tag: ""  # Defaults to Chart.appVersion
+  tag: "0.0.2"
 
 ## Deployment Configuration
 replicaCount: 2
@@ -54,15 +54,15 @@ config:
     maxBackoff: 30s
   
   # Nodepool to database mappings
-  nodepools:
-    - name: "production"
-      databases:
-        - id: "123456"
-          name: "production-db"
-    - name: "staging"
-      databases:
-        - id: "789012"
-          name: "staging-db"
+  nodepools: {}
+  #  - name: "production"
+  #    databases:
+  #      - id: "123456"
+  #        name: "production-db"
+  #  - name: "staging"
+  #    databases:
+  #      - id: "789012"
+  #        name: "staging-db"
 
 ## Linode API Token
 linode:
