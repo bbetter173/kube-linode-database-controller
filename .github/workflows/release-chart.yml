@@ -14,11 +14,13 @@ on:
 permissions:
   contents: write
   packages: read
+  issues: write
 
 jobs:
   release:
     permissions:
       contents: write
+      issues: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -41,17 +43,34 @@ jobs:
           helm repo add bitnami https://charts.bitnami.com/bitnami
           helm repo update
 
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.0
+      - name: Package Helm Charts
+        run: |
+          mkdir -p .cr-release-packages
+          helm package deployments/helm/linode-db-allowlist -d .cr-release-packages
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
         env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          charts_dir: deployments/helm
-          config: .github/cr-config.yml
+          tag_name: linode-db-allowlist-0.1.0
+          release_name: Helm Chart linode-db-allowlist 0.1.0
+          draft: false
+          prerelease: false
+
+      - name: Upload Chart Package as Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: .cr-release-packages/linode-db-allowlist-0.1.0.tgz
+          asset_name: linode-db-allowlist-0.1.0.tgz
+          asset_content_type: application/x-gzip
 
       - name: Update Helm chart repository index
         run: |
-          mkdir -p .cr-release-packages
           helm repo index --url https://bbetter173.github.io/kube-linode-database-controller/deployments/helm/charts .cr-release-packages/
           mv .cr-release-packages/index.yaml index.yaml
 
