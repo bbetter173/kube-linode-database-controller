@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mediahq/linode-db-allowlist/pkg/config"
@@ -164,6 +165,7 @@ func (c *Client) Stop() {
 
 // watchNodes sets up the informer for node events
 func (c *Client) watchNodes(ctx context.Context) error {
+	
 	// Create shared informer factory with custom resync period and specific options
 	// Use a more optimized set of options to ensure the watch doesn't miss events
 	factory := informers.NewSharedInformerFactoryWithOptions(
@@ -480,25 +482,65 @@ func (c *Client) GetNodepoolLabelValue(node *corev1.Node) string {
 }
 
 // GetExternalIP gets the external IP address of a node
+// Deprecated: Use GetExternalIPs instead
 func (c *Client) GetExternalIP(node *corev1.Node) (string, error) {
+	ips, err := c.GetExternalIPs(node)
+	if err != nil {
+		return "", err
+	}
+	
+	if len(ips) == 0 {
+		return "", fmt.Errorf("no suitable IP addresses found for node %s", node.Name)
+	}
+	
+	return ips[0], nil
+}
+
+// GetExternalIPs gets all external IP addresses of a node based on configuration
+func (c *Client) GetExternalIPs(node *corev1.Node) ([]string, error) {
+	var result []string
+	
+	// Maps to store the IPs by type (to avoid duplicates)
+	ipv4Addresses := make(map[string]bool)
+	ipv6Addresses := make(map[string]bool)
+	
+	// First pass: look for external IPs
 	for _, address := range node.Status.Addresses {
 		if address.Type == corev1.NodeExternalIP {
-			return address.Address, nil
+			// Check if it's IPv6 (contains colon)
+			isIPv6 := strings.Contains(address.Address, ":")
+			
+			if isIPv6 && c.config.EnableIPv6 {
+				ipv6Addresses[address.Address] = true
+			} else if !isIPv6 && c.config.EnableIPv4 {
+				ipv4Addresses[address.Address] = true
+			}
 		}
 	}
-
-	// Fallback to internal IP if external is not available
-	for _, address := range node.Status.Addresses {
-		if address.Type == corev1.NodeInternalIP {
-			c.logger.Warn("Node has no external IP, using internal IP",
-				zap.String("node", node.Name),
-				zap.String("ip", address.Address),
-			)
-			return address.Address, nil
-		}
+	
+	// Combine results
+	for ip := range ipv4Addresses {
+		result = append(result, ip)
 	}
-
-	return "", fmt.Errorf("no external or internal IP found for node %s", node.Name)
+	
+	for ip := range ipv6Addresses {
+		result = append(result, ip)
+	}
+	
+	// If we didn't find any IPs of the requested types
+	if len(result) == 0 {
+		requiredTypes := []string{}
+		if c.config.EnableIPv4 {
+			requiredTypes = append(requiredTypes, "IPv4")
+		}
+		if c.config.EnableIPv6 {
+			requiredTypes = append(requiredTypes, "IPv6")
+		}
+		
+		return nil, fmt.Errorf("no external %s addresses found for node %s", strings.Join(requiredTypes, " or "), node.Name)
+	}
+	
+	return result, nil
 }
 
 // GetNodesByNodepool returns all nodes in a specific nodepool

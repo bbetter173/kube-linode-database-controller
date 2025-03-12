@@ -561,4 +561,58 @@ func TestDoesNotRemoveSubnet(t *testing.T) {
 	assert.NoError(t, err)
 	mockAPI.AssertExpectations(t)
 	mockMetrics.AssertExpectations(t)
+}
+
+// TestRemoveIPv6WithCIDR tests removing an IPv6 address when the allow list contains the IPv6 with /128 CIDR notation
+func TestRemoveIPv6WithCIDR(t *testing.T) {
+	// Create test dependencies
+	logger := zaptest.NewLogger(t)
+	cfg := &config.Config{
+		LinodeToken: "test-token",
+		APIRateLimit: 100,
+		Retry: config.RetryConfig{
+			MaxAttempts: 3,
+			InitialBackoff: 1 * time.Millisecond,
+			MaxBackoff: 5 * time.Millisecond,
+		},
+		Nodepools: []config.Nodepool{
+			{
+				Name: "production",
+				Databases: []config.Database{
+					{ID: "test-db", Name: "test-db-name"},
+				},
+			},
+		},
+		EnableIPv6: true,
+	}
+
+	// Create mocks
+	mockAPI := &MockLinodeAPI{}
+	mockMetrics := &MockMetricsClient{}
+
+	// Set up expectations for the test
+	// The allow list contains IPv6 addresses, one with /128 CIDR notation
+	mockAPI.On("GetDatabaseAllowList", mock.Anything, "test-db").Return(
+		[]string{"2001:db8::1/128", "2001:db8::2"}, nil,
+	)
+	
+	// Expect the API to be called with the updated allow list (without the IPv6 address)
+	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"2001:db8::2"}).Return(nil)
+	
+	// Metrics expectations
+	mockMetrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.Anything).Return()
+	mockMetrics.On("IncrementAllowListUpdates", "test-db-name", "remove").Return()
+	mockMetrics.On("UpdatePendingDeletions", "production", 0).Return()
+
+	// Create client with mocks
+	client := NewClientWithAPI(logger, cfg, mockAPI, mockMetrics)
+
+	// Test removing an IPv6 address that exists in the allow list with CIDR notation
+	// We're trying to remove 2001:db8::1 but it's stored as 2001:db8::1/128
+	err := client.handleDeleteOperation(context.Background(), "production", cfg.Nodepools[0].Databases, "test-node", "2001:db8::1")
+	
+	// Verify expectations
+	assert.NoError(t, err)
+	mockAPI.AssertExpectations(t)
+	mockMetrics.AssertExpectations(t)
 } 

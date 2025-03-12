@@ -95,6 +95,183 @@ func TestGetNodepoolName(t *testing.T) {
 	}
 }
 
+// TestGetExternalIPs tests the GetExternalIPs method
+func TestGetExternalIPs(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	
+	tests := []struct {
+		name           string
+		ipv4Enabled    bool
+		ipv6Enabled    bool
+		addresses      []corev1.NodeAddress
+		expectedIPs    []string
+		expectedError  bool
+	}{
+		{
+			name:        "Both IPv4 and IPv6 enabled with external IPs",
+			ipv4Enabled: true,
+			ipv6Enabled: true,
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeExternalIP, Address: "192.168.1.1"},
+				{Type: corev1.NodeExternalIP, Address: "2001:db8::1"},
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+				{Type: corev1.NodeInternalIP, Address: "fd00::1"},
+			},
+			expectedIPs:   []string{"192.168.1.1", "2001:db8::1"},
+			expectedError: false,
+		},
+		{
+			name:        "Only IPv4 enabled with both IPs",
+			ipv4Enabled: true,
+			ipv6Enabled: false,
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeExternalIP, Address: "192.168.1.1"},
+				{Type: corev1.NodeExternalIP, Address: "2001:db8::1"},
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			},
+			expectedIPs:   []string{"192.168.1.1"},
+			expectedError: false,
+		},
+		{
+			name:        "Only IPv6 enabled with both IPs",
+			ipv4Enabled: false,
+			ipv6Enabled: true,
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeExternalIP, Address: "192.168.1.1"},
+				{Type: corev1.NodeExternalIP, Address: "2001:db8::1"},
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			},
+			expectedIPs:   []string{"2001:db8::1"},
+			expectedError: false,
+		},
+		{
+			name:        "No suitable IPs found",
+			ipv4Enabled: true,
+			ipv6Enabled: false,
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeExternalIP, Address: "2001:db8::1"},
+				{Type: corev1.NodeInternalIP, Address: "fd00::1"},
+			},
+			expectedIPs:   nil,
+			expectedError: true,
+		},
+		{
+			name:        "Both enabled but neither found",
+			ipv4Enabled: true,
+			ipv6Enabled: true,
+			addresses:   []corev1.NodeAddress{},
+			expectedIPs:   nil,
+			expectedError: true,
+		},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create config and node
+			cfg := &config.Config{
+				EnableIPv4: tt.ipv4Enabled,
+				EnableIPv6: tt.ipv6Enabled,
+			}
+			
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: tt.addresses,
+				},
+			}
+			
+			// Create client
+			client := &Client{
+				logger: logger,
+				config: cfg,
+			}
+			
+			// Call the function
+			ips, err := client.GetExternalIPs(node)
+			
+			// Check results
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.ElementsMatch(t, tt.expectedIPs, ips)
+			}
+		})
+	}
+}
+
+// Add a test for backward compatibility with GetExternalIP
+func TestGetExternalIPBackwardCompatibility(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	
+	// Create a node with both IPv4 and IPv6 addresses
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+		Status: corev1.NodeStatus{
+			Addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeExternalIP, Address: "192.168.1.1"},
+				{Type: corev1.NodeExternalIP, Address: "2001:db8::1"},
+			},
+		},
+	}
+	
+	// Test with IPv4 enabled
+	t.Run("IPv4 enabled", func(t *testing.T) {
+		cfg := &config.Config{
+			EnableIPv4: true,
+			EnableIPv6: false,
+		}
+		
+		client := &Client{
+			logger: logger,
+			config: cfg,
+		}
+		
+		ip, err := client.GetExternalIP(node)
+		assert.NoError(t, err)
+		assert.Equal(t, "192.168.1.1", ip)
+	})
+	
+	// Test with IPv6 enabled
+	t.Run("IPv6 enabled", func(t *testing.T) {
+		cfg := &config.Config{
+			EnableIPv4: false,
+			EnableIPv6: true,
+		}
+		
+		client := &Client{
+			logger: logger,
+			config: cfg,
+		}
+		
+		ip, err := client.GetExternalIP(node)
+		assert.NoError(t, err)
+		assert.Equal(t, "2001:db8::1", ip)
+	})
+	
+	// Test with both enabled (should return the first one found)
+	t.Run("Both enabled", func(t *testing.T) {
+		cfg := &config.Config{
+			EnableIPv4: true,
+			EnableIPv6: true,
+		}
+		
+		client := &Client{
+			logger: logger,
+			config: cfg,
+		}
+		
+		ip, err := client.GetExternalIP(node)
+		assert.NoError(t, err)
+		// The first IP will depend on the implementation order, but should be one of the available ones
+		assert.Contains(t, []string{"192.168.1.1", "2001:db8::1"}, ip)
+	})
+}
+
 // TestGetNodesByNodepool tests fetching nodes by nodepool
 func TestGetNodesByNodepool(t *testing.T) {
 	// Create a fake clientset

@@ -39,12 +39,19 @@ spec:
           args:
             - "--config=/etc/linode-db-allowlist/config.yaml"
             - "--metrics-addr=:{{ .Values.service.port }}"
-            {{- if .Values.config.logLevel }}
-            - "--log-level={{ .Values.config.logLevel }}"
-            {{- end }}
           env:
             - name: LINODE_TOKEN
               {{- include "linode-db-allowlist.linodeToken" . | nindent 14 }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: NODEPOOL_LABEL_KEY
+              value: {{ .Values.config.nodepoolLabelKey | quote }}
+            - name: ENABLE_IPV4
+              value: {{ .Values.config.enableIPv4 | quote }}
+            - name: ENABLE_IPV6
+              value: {{ .Values.config.enableIPv6 | quote }}
+            - name: API_RATE_LIMIT
+              value: {{ .Values.config.apiRateLimit | quote }}
           ports:
             - name: metrics
               containerPort: {{ .Values.service.port }}
