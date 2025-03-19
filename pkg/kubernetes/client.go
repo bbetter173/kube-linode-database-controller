@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"go.uber.org/zap"
+	"sync"
 )
 
 const (
@@ -43,17 +44,24 @@ type NodeHandler func(node *corev1.Node, eventType string) error
 
 // Client manages Kubernetes connectivity and node watching
 type Client struct {
-	clientset         *kubernetes.Clientset
-	logger            *zap.Logger
-	config            *config.Config
-	metricsClient     interface{
+	clientset          *kubernetes.Clientset
+	logger             *zap.Logger
+	config             *config.Config
+	metricsClient      interface{
 		SetLeaderStatus(bool)
 	}
-	nodeAddHandler    NodeHandler
-	nodeDelHandler    NodeHandler
-	stopCh            chan struct{}
-	leaseLockName     string
+	nodeAddHandler     NodeHandler
+	nodeDelHandler     NodeHandler
+	stopCh             chan struct{}
+	leaseLockName      string
 	leaseLockNamespace string
+	leadershipMutex    sync.RWMutex
+	isLeader           bool
+	
+	// For testing
+	errorsMutex        sync.RWMutex
+	errorsCount        map[string]int
+	restartsCount      int
 }
 
 // NewClient creates a new Kubernetes client
@@ -92,6 +100,7 @@ func NewClient(logger *zap.Logger, cfg *config.Config, kubeconfigPath string, le
 		stopCh:            make(chan struct{}),
 		leaseLockName:     leaseLockName,
 		leaseLockNamespace: leaseLockNamespace,
+		errorsCount:       make(map[string]int),
 	}, nil
 }
 
@@ -107,6 +116,102 @@ func (c *Client) Start(ctx context.Context) error {
 		return fmt.Errorf("node handlers are not registered")
 	}
 
+	// Create an election context that can be cancelled to restart election
+	electionCtx, cancelElection := context.WithCancel(ctx)
+	defer cancelElection()
+
+	// Run leader election in a separate goroutine so we can monitor it
+	electionErrCh := make(chan error, 1)
+	go c.runLeaderElection(electionCtx, electionErrCh)
+
+	// Monitor for leader election errors and restart if needed
+	for {
+		select {
+		case <-ctx.Done():
+			// Main context cancelled, exit
+			c.logger.Info("Context cancelled, stopping leader election")
+			return ctx.Err()
+		case err := <-electionErrCh:
+			// Leader election encountered an error
+			c.logger.Error("Leader election error, will restart election process", zap.Error(err))
+			
+			// Update metrics
+			if c.metricsClient != nil {
+				c.metricsClient.SetLeaderStatus(false)
+				
+				// Determine error type for metrics
+				errorType := ClassifyLeaderElectionError(err)
+				
+				// Increment error counter with type
+				c.incrementLeaderElectionError(errorType)
+				
+				// Increment restart counter
+				c.incrementLeaderElectionRestart()
+			}
+			
+			// Wait a bit before restarting to avoid rapid restarts
+			time.Sleep(5 * time.Second)
+			
+			// Stop current election
+			cancelElection()
+			
+			// Create a new election context
+			electionCtx, cancelElection = context.WithCancel(ctx)
+			
+			// Restart election
+			go c.runLeaderElection(electionCtx, electionErrCh)
+		}
+	}
+}
+
+// Helper methods to increment metrics if available
+func (c *Client) incrementLeaderElectionError(errorType string) {
+	// Update our internal counters
+	c.errorsMutex.Lock()
+	c.errorsCount[errorType]++
+	c.errorsMutex.Unlock()
+	
+	// Update metrics if available
+	if metricsClient, ok := c.metricsClient.(interface{ IncrementLeaderElectionError(string) }); ok {
+		metricsClient.IncrementLeaderElectionError(errorType)
+	}
+}
+
+func (c *Client) incrementLeaderElectionRestart() {
+	// Update our internal counter
+	c.errorsMutex.Lock()
+	c.restartsCount++
+	c.errorsMutex.Unlock()
+	
+	// Update metrics if available
+	if metricsClient, ok := c.metricsClient.(interface{ IncrementLeaderElectionRestart() }); ok {
+		metricsClient.IncrementLeaderElectionRestart()
+	}
+}
+
+// For testing: get error counts
+func (c *Client) GetErrorCounts() map[string]int {
+	c.errorsMutex.RLock()
+	defer c.errorsMutex.RUnlock()
+	
+	// Make a copy to avoid data races
+	result := make(map[string]int, len(c.errorsCount))
+	for k, v := range c.errorsCount {
+		result[k] = v
+	}
+	
+	return result
+}
+
+// For testing: get restart count
+func (c *Client) GetRestartCount() int {
+	c.errorsMutex.RLock()
+	defer c.errorsMutex.RUnlock()
+	return c.restartsCount
+}
+
+// runLeaderElection runs the leader election process and sends error on channel if election fails
+func (c *Client) runLeaderElection(ctx context.Context, errCh chan<- error) {
 	// Create a new lock
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
@@ -119,8 +224,8 @@ func (c *Client) Start(ctx context.Context) error {
 		},
 	}
 
-	// Start leader election
-	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+	// Create config for leader election with error handling
+	config := leaderelection.LeaderElectionConfig{
 		Lock:            lock,
 		ReleaseOnCancel: true,
 		LeaseDuration:   LeaseDuration,
@@ -129,33 +234,72 @@ func (c *Client) Start(ctx context.Context) error {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				c.logger.Info("Started leading, watching nodes")
+				
+				// Update leader status
+				c.leadershipMutex.Lock()
+				c.isLeader = true
+				c.leadershipMutex.Unlock()
+				
 				if c.metricsClient != nil {
 					c.metricsClient.SetLeaderStatus(true)
 				}
 				if err := c.watchNodes(ctx); err != nil {
 					c.logger.Error("Error watching nodes", zap.Error(err))
+					// Send error to channel to trigger restart
+					select {
+					case errCh <- fmt.Errorf("Error watching nodes: %w", err):
+					default:
+						// Channel full, just log
+						c.logger.Error("Failed to send watch nodes error", zap.Error(err))
+					}
 				}
 			},
 			OnStoppedLeading: func() {
 				c.logger.Info("Stopped leading")
+				
+				// Update leader status
+				c.leadershipMutex.Lock()
+				c.isLeader = false
+				c.leadershipMutex.Unlock()
+				
 				if c.metricsClient != nil {
 					c.metricsClient.SetLeaderStatus(false)
 				}
-				close(c.stopCh)
+				
+				// Reset the stop channel for a potential restart
+				c.stopCh = make(chan struct{})
+				
+				// Only send error if context isn't cancelled already
+				if ctx.Err() == nil {
+					// Not due to context cancellation, should be restarted
+					select {
+					case errCh <- fmt.Errorf("stopped leading unexpectedly"):
+					default:
+						// Channel full, just log
+						c.logger.Warn("Failed to send leadership loss notification")
+					}
+				}
 			},
 			OnNewLeader: func(identity string) {
 				if identity != getHostname() {
 					c.logger.Info("New leader elected", zap.String("leader", identity))
+					
+					// If we're not the leader, ensure our status is updated
+					c.leadershipMutex.Lock()
+					c.isLeader = identity == getHostname()
+					c.leadershipMutex.Unlock()
+					
 					// If we're not the leader, ensure our status is set to false
 					if c.metricsClient != nil {
-						c.metricsClient.SetLeaderStatus(false)
+						c.metricsClient.SetLeaderStatus(c.isLeader)
 					}
 				}
 			},
 		},
-	})
+	}
 
-	return nil
+	// Start leader election
+	leaderelection.RunOrDie(ctx, config)
 }
 
 // Stop stops watching for node events
@@ -697,4 +841,11 @@ func (c *Client) verifyWatchConsistency(ctx context.Context) (bool, map[string]i
 	}
 
 	return consistent, nodepoolCounts
+}
+
+// IsLeader returns whether this client is currently the leader
+func (c *Client) IsLeader() bool {
+	c.leadershipMutex.RLock()
+	defer c.leadershipMutex.RUnlock()
+	return c.isLeader
 } 
