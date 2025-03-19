@@ -111,9 +111,9 @@ func TestUpdateAllowList(t *testing.T) {
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations
+		// Setup mock expectations with normalized IPs (with CIDR)
 		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Once()
-		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1", "2.2.2.2"}).Return(nil).Once()
+		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1/32", "2.2.2.2/32"}).Return(nil).Once()
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "add", mock.AnythingOfType("float64")).Once()
 		metrics.On("IncrementAllowListUpdates", "test-db-name", "add").Once()
 		
@@ -134,8 +134,8 @@ func TestUpdateAllowList(t *testing.T) {
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1", "2.2.2.2"}, nil).Once()
+		// Setup mock expectations with normalized IPs (with CIDR)
+		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1/32", "2.2.2.2/32"}, nil).Once()
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "add", mock.AnythingOfType("float64")).Once()
 		// Note: No UpdateDatabaseAllowList or IncrementAllowListUpdates calls expected
 		
@@ -156,9 +156,9 @@ func TestUpdateAllowList(t *testing.T) {
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1", "2.2.2.2"}, nil).Once()
-		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1"}).Return(nil).Once()
+		// Setup mock expectations with normalized IPs (with CIDR)
+		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1/32", "2.2.2.2/32"}, nil).Once()
+		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1/32"}).Return(nil).Once()
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.AnythingOfType("float64")).Once()
 		metrics.On("IncrementAllowListUpdates", "test-db-name", "remove").Once()
 		metrics.On("UpdatePendingDeletions", "production", 0).Once()
@@ -180,8 +180,8 @@ func TestUpdateAllowList(t *testing.T) {
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations - IP is not in the list, so no update should happen
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Once()
+		// Setup mock expectations with normalized IPs (with CIDR)
+		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1/32"}, nil).Once()
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.AnythingOfType("float64")).Once()
 		metrics.On("UpdatePendingDeletions", "production", 0).Once()
 		
@@ -204,11 +204,11 @@ func TestUpdateAllowList(t *testing.T) {
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1", "0.0.0.0/0"}, nil).Once()
+		// Setup mock expectations (0.0.0.0/0 already has CIDR notation, so no change needed)
+		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1/32", "0.0.0.0/0"}, nil).Once()
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "add", mock.AnythingOfType("float64")).Once()
 		metrics.On("IncrementAllowListOpenAccessAlerts", "test-db-name").Once()
-		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"0.0.0.0/0", "1.1.1.1", "2.2.2.2"}).Return(nil).Once()
+		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"0.0.0.0/0", "1.1.1.1/32", "2.2.2.2/32"}).Return(nil).Once()
 		metrics.On("IncrementAllowListUpdates", "test-db-name", "add").Once()
 		
 		// Create client with mocks
@@ -249,10 +249,9 @@ func TestUpdateAllowList(t *testing.T) {
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations - the first GetDatabaseAllowList is used to populate the cache
-		// Subsequent calls use the cached value
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Once()
-		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1", "2.2.2.2"}).Return(assert.AnError).Times(3)
+		// Setup mock expectations with normalized IPs (with CIDR)
+		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1/32"}, nil).Once()
+		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1/32", "2.2.2.2/32"}).Return(assert.AnError).Times(3)
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "add", mock.AnythingOfType("float64")).Once()
 		// Note: No IncrementAllowListUpdates call expected because the update failed
 		
@@ -314,9 +313,9 @@ func TestHandleDeleteOperation(t *testing.T) {
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1", "2.2.2.2"}, nil).Once()
-		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1"}).Return(nil).Once()
+		// Setup mock expectations with normalized IPs (with CIDR)
+		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1/32", "2.2.2.2/32"}, nil).Once()
+		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1/32"}).Return(nil).Once()
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.AnythingOfType("float64")).Once()
 		metrics.On("IncrementAllowListUpdates", "test-db-name", "remove").Once()
 		metrics.On("UpdatePendingDeletions", "production", 0).Once() // Called with 0 for immediate deletion
@@ -338,8 +337,8 @@ func TestHandleDeleteOperation(t *testing.T) {
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations - IP is not in the list, so no update should happen
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Once()
+		// Setup mock expectations with normalized IPs (with CIDR)
+		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1/32"}, nil).Once()
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.AnythingOfType("float64")).Once()
 		metrics.On("UpdatePendingDeletions", "production", 0).Once()
 		
@@ -384,9 +383,9 @@ func TestRateLimiter(t *testing.T) {
 	api := &MockLinodeAPI{}
 	metrics := &MockMetricsClient{}
 	
-	// Setup mock expectations for multiple calls
-	api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Times(3)
-	api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1", "2.2.2.2"}).Return(nil).Times(3)
+	// Setup mock expectations for multiple calls with normalized IPs (with CIDR)
+	api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1/32"}, nil).Times(3)
+	api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1/32", "2.2.2.2/32"}).Return(nil).Times(3)
 	metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "add", mock.AnythingOfType("float64")).Times(3)
 	metrics.On("IncrementAllowListUpdates", "test-db-name", "add").Times(3)
 	
@@ -425,27 +424,32 @@ func TestNormalizeIP(t *testing.T) {
 		{
 			name:     "IP without CIDR",
 			input:    "192.168.1.1",
-			expected: "192.168.1.1",
+			expected: "192.168.1.1/32",
 		},
 		{
 			name:     "IP with /32 CIDR",
 			input:    "192.168.1.1/32",
-			expected: "192.168.1.1",
+			expected: "192.168.1.1/32",
 		},
 		{
 			name:     "IP with /24 CIDR",
 			input:    "192.168.1.0/24",
-			expected: "192.168.1.0/24", // Should not be stripped, as it's an actual subnet
+			expected: "192.168.1.0/24", // Kept as is since it already has CIDR
 		},
 		{
 			name:     "IPv6 with /128 CIDR",
 			input:    "2001:db8::1/128",
-			expected: "2001:db8::1",
+			expected: "2001:db8::1/128",
 		},
 		{
 			name:     "IPv6 with /64 CIDR",
 			input:    "2001:db8::/64",
-			expected: "2001:db8::/64", // Should not be stripped, as it's an actual subnet
+			expected: "2001:db8::/64", // Kept as is since it already has CIDR
+		},
+		{
+			name:     "Raw IPv6 address",
+			input:    "2001:db8::1",
+			expected: "2001:db8::1/128",
 		},
 	}
 
@@ -484,13 +488,13 @@ func TestRemoveIPWithCIDR(t *testing.T) {
 	mockMetrics := &MockMetricsClient{}
 
 	// Set up expectations for the test
-	// The allow list contains the IP with CIDR notation
+	// The allow list already contains explicit CIDR notation
 	mockAPI.On("GetDatabaseAllowList", mock.Anything, "test-db").Return(
-		[]string{"172.105.162.60/32", "192.168.1.1"}, nil,
+		[]string{"172.105.162.60/32", "192.168.1.1/32"}, nil,
 	)
 	
 	// Expect the API to be called with the updated allow list (without the IP)
-	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"192.168.1.1"}).Return(nil)
+	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"192.168.1.1/32"}).Return(nil)
 	
 	// Metrics expectations
 	mockMetrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.Anything).Return()
@@ -540,12 +544,12 @@ func TestDoesNotRemoveSubnet(t *testing.T) {
 	// Set up expectations for the test
 	// The allow list contains a subnet (non-/32 CIDR)
 	mockAPI.On("GetDatabaseAllowList", mock.Anything, "test-db").Return(
-		[]string{"192.168.1.0/24", "10.0.0.1"}, nil,
+		[]string{"192.168.1.0/24", "10.0.0.1/32"}, nil,
 	)
 	
 	// No changes should be made to the allow list since 192.168.1.1 should not match 192.168.1.0/24
 	// We should receive the full list back
-	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"192.168.1.0/24", "10.0.0.1"}).Return(nil).Maybe()
+	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"10.0.0.1/32", "192.168.1.0/24"}).Return(nil).Maybe()
 	
 	// Metrics expectations
 	mockMetrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.Anything).Return()
@@ -594,11 +598,11 @@ func TestRemoveIPv6WithCIDR(t *testing.T) {
 	// Set up expectations for the test
 	// The allow list contains IPv6 addresses, one with /128 CIDR notation
 	mockAPI.On("GetDatabaseAllowList", mock.Anything, "test-db").Return(
-		[]string{"2001:db8::1/128", "2001:db8::2"}, nil,
+		[]string{"2001:db8::1/128", "2001:db8::2/128"}, nil,
 	)
 	
 	// Expect the API to be called with the updated allow list (without the IPv6 address)
-	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"2001:db8::2"}).Return(nil)
+	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"2001:db8::2/128"}).Return(nil)
 	
 	// Metrics expectations
 	mockMetrics.On("ObserveAllowListUpdateLatency", "test-db-name", "remove", mock.Anything).Return()
@@ -650,8 +654,8 @@ func TestCacheOperations(t *testing.T) {
 	mockMetrics.On("IncrementAllowListUpdates", mock.Anything, mock.Anything).Return()
 	mockMetrics.On("IncrementAllowListOpenAccessAlerts", mock.Anything).Return().Maybe()
 	
-	// Setup expected API calls for initial cache load
-	mockAPI.On("GetDatabaseAllowList", mock.Anything, "1").Return([]string{"192.168.1.1"}, nil).Once()
+	// Setup expected API calls for initial cache load with normalized IPs
+	mockAPI.On("GetDatabaseAllowList", mock.Anything, "1").Return([]string{"192.168.1.1/32"}, nil).Once()
 	
 	// Create client with mock API
 	client := NewClientWithAPI(logger, cfg, mockAPI, mockMetrics)
@@ -664,13 +668,13 @@ func TestCacheOperations(t *testing.T) {
 	// Verify cache was loaded
 	allowList, err := client.getCachedAllowList(ctx, "1", "test-db")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"192.168.1.1"}, allowList)
+	assert.Equal(t, []string{"192.168.1.1/32"}, allowList)
 	
-	// Set up API expectations for cache invalidation test
+	// Set up API expectations for cache invalidation test with normalized IPs
 	// First call should use cache (no API call)
 	// After update, cache will be invalidated, so second call should call API
-	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "1", []string{"192.168.1.1", "192.168.1.2"}).Return(nil).Once()
-	mockAPI.On("GetDatabaseAllowList", mock.Anything, "1").Return([]string{"192.168.1.1", "192.168.1.2"}, nil).Once()
+	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "1", []string{"192.168.1.1/32", "192.168.1.2/32"}).Return(nil).Once()
+	mockAPI.On("GetDatabaseAllowList", mock.Anything, "1").Return([]string{"192.168.1.1/32", "192.168.1.2/32"}, nil).Once()
 	
 	// Test updating the allow list (should invalidate cache)
 	err = client.updateDatabaseAllowList(ctx, "1", "test-db", "test-node", "192.168.1.2", "add")
@@ -679,7 +683,7 @@ func TestCacheOperations(t *testing.T) {
 	// Verify cached list is updated after invalidation
 	allowList, err = client.getCachedAllowList(ctx, "1", "test-db")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"192.168.1.1", "192.168.1.2"}, allowList)
+	assert.Equal(t, []string{"192.168.1.1/32", "192.168.1.2/32"}, allowList)
 	
 	// Verify all expected API calls were made
 	mockAPI.AssertExpectations(t)

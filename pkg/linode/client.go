@@ -475,14 +475,21 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 	}, utils.DefaultIsRetryable)
 }
 
-// normalizeIP removes CIDR notation from an IP address, but only if it's a /32 (IPv4) or /128 (IPv6) subnet 
-// representing a single IP address
-// e.g., "192.168.1.1/32" becomes "192.168.1.1", but "192.168.1.0/24" remains "192.168.1.0/24"
+// normalizeIP normalizes IP addresses for consistent representation:
+// - For raw IP addresses (without CIDR), adds the appropriate CIDR notation (/32 for IPv4, /128 for IPv6)
+// - For addresses that already include a CIDR, returns them unchanged
 func normalizeIP(ip string) string {
-	if strings.HasSuffix(ip, "/32") || strings.HasSuffix(ip, "/128") {
-		if idx := strings.Index(ip, "/"); idx != -1 {
-			return ip[:idx]
-		}
+	// If already has CIDR notation, return as is
+	if strings.Contains(ip, "/") {
+		return ip
 	}
-	return ip
+	
+	// For raw IP addresses without CIDR, add the appropriate notation
+	if strings.Contains(ip, ":") {
+		// IPv6 address, add /128
+		return ip + "/128"
+	} else {
+		// IPv4 address, add /32
+		return ip + "/32"
+	}
 } 
