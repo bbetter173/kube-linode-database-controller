@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -52,7 +53,8 @@ func TestExponentialBackoff(t *testing.T) {
 }
 
 func TestCircuitBreaker(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	// Create a logger that doesn't exit on Fatal for testing
+	logger := zaptest.NewLogger(t, zaptest.WrapOptions(zap.AddCaller()))
 	
 	// Mock exit function that doesn't really exit
 	var exitCalled int32

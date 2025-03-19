@@ -104,6 +104,7 @@ func (r *ReliabilityTracker) RecordFailure() {
 		r.logger.Error("Circuit breaker tripped - too many failures",
 			zap.Int("failures", len(r.failures)),
 			zap.Duration("window", CircuitBreakerWindowDuration),
+			zap.Int("exit_code", 1),
 		)
 		r.state = CircuitOpen
 		r.trippedAt = now
@@ -112,6 +113,7 @@ func (r *ReliabilityTracker) RecordFailure() {
 		go func() {
 			// Give the error time to log
 			time.Sleep(500 * time.Millisecond)
+			r.logger.Error("Application exiting with non-zero status code due to circuit breaker trip")
 			r.exitFunc(1) // Exit with error code 1
 		}()
 	}
