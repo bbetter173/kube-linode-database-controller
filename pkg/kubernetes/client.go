@@ -62,6 +62,9 @@ type Client struct {
 	errorsMutex        sync.RWMutex
 	errorsCount        map[string]int
 	restartsCount      int
+	
+	// Reliability tracking
+	reliabilityTracker *ReliabilityTracker
 }
 
 // NewClient creates a new Kubernetes client
@@ -92,7 +95,7 @@ func NewClient(logger *zap.Logger, cfg *config.Config, kubeconfigPath string, le
 		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	return &Client{
+	client := &Client{
 		clientset:         clientset,
 		logger:            logger,
 		config:            cfg,
@@ -101,7 +104,12 @@ func NewClient(logger *zap.Logger, cfg *config.Config, kubeconfigPath string, le
 		leaseLockName:     leaseLockName,
 		leaseLockNamespace: leaseLockNamespace,
 		errorsCount:       make(map[string]int),
-	}, nil
+	}
+	
+	// Initialize reliability tracker with os.Exit as the exit function
+	client.reliabilityTracker = NewReliabilityTracker(logger, os.Exit)
+
+	return client, nil
 }
 
 // RegisterNodeHandlers sets the callback functions for node events
@@ -149,8 +157,30 @@ func (c *Client) Start(ctx context.Context) error {
 				c.incrementLeaderElectionRestart()
 			}
 			
-			// Wait a bit before restarting to avoid rapid restarts
-			time.Sleep(5 * time.Second)
+			// Record failure in reliability tracker
+			c.reliabilityTracker.RecordFailure()
+			
+			// Check if circuit breaker has tripped
+			if c.reliabilityTracker.IsCircuitOpen() {
+				c.logger.Fatal("Circuit breaker is open - too many leader election failures. Exiting.")
+				// The reliabilityTracker will call os.Exit
+				return fmt.Errorf("circuit breaker triggered application exit")
+			}
+			
+			// Use exponential backoff for restart delay
+			backoffDuration := c.reliabilityTracker.GetBackoffDuration()
+			c.logger.Info("Waiting before restart due to exponential backoff",
+				zap.Duration("backoff_duration", backoffDuration),
+			)
+			
+			// Wait for backoff duration before restarting
+			select {
+			case <-time.After(backoffDuration):
+				// Continue to restart
+			case <-ctx.Done():
+				// Main context cancelled during backoff
+				return ctx.Err()
+			}
 			
 			// Stop current election
 			cancelElection()
@@ -243,6 +273,10 @@ func (c *Client) runLeaderElection(ctx context.Context, errCh chan<- error) {
 				if c.metricsClient != nil {
 					c.metricsClient.SetLeaderStatus(true)
 				}
+				
+				// Record success in reliability tracker - we've successfully become leader
+				c.reliabilityTracker.RecordSuccess()
+				
 				if err := c.watchNodes(ctx); err != nil {
 					c.logger.Error("Error watching nodes", zap.Error(err))
 					// Send error to channel to trigger restart
