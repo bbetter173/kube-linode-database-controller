@@ -24,8 +24,10 @@ func TestExponentialBackoff(t *testing.T) {
 	
 	// Test initial backoff (retry count 0)
 	backoff := tracker.GetBackoffDuration()
+	t.Logf("Initial backoff duration: %v", backoff)
 	minExpectedTime := time.Duration(float64(MinBackoffSeconds) * (1.0 - BackoffJitter) * float64(time.Second))
 	maxExpectedTime := time.Duration(float64(MinBackoffSeconds) * (1.0 + BackoffJitter) * float64(time.Second))
+	t.Logf("Expected range for initial backoff: %v to %v", minExpectedTime, maxExpectedTime)
 	assert.GreaterOrEqual(t, backoff, minExpectedTime)
 	assert.LessOrEqual(t, backoff, maxExpectedTime)
 	
@@ -36,9 +38,11 @@ func TestExponentialBackoff(t *testing.T) {
 	
 	// After 3 failures, backoff should be around 2^3 = 8 seconds
 	backoff = tracker.GetBackoffDuration()
+	t.Logf("Backoff after 3 failures: %v", backoff)
 	expectedBackoff := float64(MinBackoffSeconds) * 8.0 // 2^3
 	minExpectedTime = time.Duration(expectedBackoff * (1.0 - BackoffJitter) * float64(time.Second))
 	maxExpectedTime = time.Duration(expectedBackoff * (1.0 + BackoffJitter) * float64(time.Second))
+	t.Logf("Expected range after 3 failures: %v to %v", minExpectedTime, maxExpectedTime)
 	assert.GreaterOrEqual(t, backoff, minExpectedTime)
 	assert.LessOrEqual(t, backoff, maxExpectedTime)
 	
@@ -46,8 +50,10 @@ func TestExponentialBackoff(t *testing.T) {
 	tracker.RecordSuccess()
 	
 	backoff = tracker.GetBackoffDuration()
+	t.Logf("Backoff after success reset: %v", backoff)
 	minExpectedTime = time.Duration(float64(MinBackoffSeconds) * (1.0 - BackoffJitter) * float64(time.Second))
 	maxExpectedTime = time.Duration(float64(MinBackoffSeconds) * (1.0 + BackoffJitter) * float64(time.Second))
+	t.Logf("Expected range after reset: %v to %v", minExpectedTime, maxExpectedTime)
 	assert.GreaterOrEqual(t, backoff, minExpectedTime)
 	assert.LessOrEqual(t, backoff, maxExpectedTime)
 }

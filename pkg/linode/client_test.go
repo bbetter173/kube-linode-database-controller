@@ -249,8 +249,9 @@ func TestUpdateAllowList(t *testing.T) {
 		api := &MockLinodeAPI{}
 		metrics := &MockMetricsClient{}
 		
-		// Setup mock expectations
-		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Times(3)
+		// Setup mock expectations - the first GetDatabaseAllowList is used to populate the cache
+		// Subsequent calls use the cached value
+		api.On("GetDatabaseAllowList", mock.Anything, "test-db").Return([]string{"1.1.1.1"}, nil).Once()
 		api.On("UpdateDatabaseAllowList", mock.Anything, "test-db", []string{"1.1.1.1", "2.2.2.2"}).Return(assert.AnError).Times(3)
 		metrics.On("ObserveAllowListUpdateLatency", "test-db-name", "add", mock.AnythingOfType("float64")).Once()
 		// Note: No IncrementAllowListUpdates call expected because the update failed
@@ -615,4 +616,71 @@ func TestRemoveIPv6WithCIDR(t *testing.T) {
 	assert.NoError(t, err)
 	mockAPI.AssertExpectations(t)
 	mockMetrics.AssertExpectations(t)
+}
+
+// TestCacheOperations tests the allow list caching functionality
+func TestCacheOperations(t *testing.T) {
+	// Create mock API
+	mockAPI := &MockLinodeAPI{}
+	
+	// Create test dependencies
+	logger := zaptest.NewLogger(t)
+	cfg := &config.Config{
+		APIRateLimit: 100,
+		Retry: config.RetryConfig{
+			MaxAttempts:    3,
+			InitialBackoff: 1 * time.Millisecond, // Fast for tests
+			MaxBackoff:     5 * time.Millisecond, // Fast for tests
+		},
+		Nodepools: []config.Nodepool{
+			{
+				Name: "test-pool",
+				Databases: []config.Database{
+					{
+						ID:   "1",
+						Name: "test-db",
+					},
+				},
+			},
+		},
+	}
+	
+	mockMetrics := &MockMetricsClient{}
+	mockMetrics.On("ObserveAllowListUpdateLatency", mock.Anything, mock.Anything, mock.Anything).Return()
+	mockMetrics.On("IncrementAllowListUpdates", mock.Anything, mock.Anything).Return()
+	mockMetrics.On("IncrementAllowListOpenAccessAlerts", mock.Anything).Return().Maybe()
+	
+	// Setup expected API calls for initial cache load
+	mockAPI.On("GetDatabaseAllowList", mock.Anything, "1").Return([]string{"192.168.1.1"}, nil).Once()
+	
+	// Create client with mock API
+	client := NewClientWithAPI(logger, cfg, mockAPI, mockMetrics)
+	
+	// Initialize cache
+	ctx := context.Background()
+	err := client.InitializeCache(ctx)
+	require.NoError(t, err)
+	
+	// Verify cache was loaded
+	allowList, err := client.getCachedAllowList(ctx, "1", "test-db")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"192.168.1.1"}, allowList)
+	
+	// Set up API expectations for cache invalidation test
+	// First call should use cache (no API call)
+	// After update, cache will be invalidated, so second call should call API
+	mockAPI.On("UpdateDatabaseAllowList", mock.Anything, "1", []string{"192.168.1.1", "192.168.1.2"}).Return(nil).Once()
+	mockAPI.On("GetDatabaseAllowList", mock.Anything, "1").Return([]string{"192.168.1.1", "192.168.1.2"}, nil).Once()
+	
+	// Test updating the allow list (should invalidate cache)
+	err = client.updateDatabaseAllowList(ctx, "1", "test-db", "test-node", "192.168.1.2", "add")
+	require.NoError(t, err)
+	
+	// Verify cached list is updated after invalidation
+	allowList, err = client.getCachedAllowList(ctx, "1", "test-db")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"192.168.1.1", "192.168.1.2"}, allowList)
+	
+	// Verify all expected API calls were made
+	mockAPI.AssertExpectations(t)
 } 

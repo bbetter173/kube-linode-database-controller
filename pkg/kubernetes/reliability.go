@@ -14,7 +14,7 @@ const (
 	MinBackoffSeconds = 1
 	
 	// MaxBackoffSeconds is the maximum backoff duration in seconds
-	MaxBackoffSeconds = 60
+	MaxBackoffSeconds = 30
 	
 	// BackoffFactor is the multiplier for each retry attempt
 	BackoffFactor = 2.0

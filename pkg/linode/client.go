@@ -97,6 +97,12 @@ func (a *LinodeAPIAdapter) UpdateDatabaseAllowList(ctx context.Context, dbID str
 	return nil
 }
 
+// CacheEntry represents a cached allow list for a database
+type CacheEntry struct {
+	AllowList   []string
+	LastFetched time.Time
+}
+
 // Client implements LinodeClient interface
 type Client struct {
 	api              LinodeAPI
@@ -105,6 +111,10 @@ type Client struct {
 	metrics          MetricsClient
 	mutex            sync.Mutex
 	rateLimiter      *rate.Limiter
+	
+	// Cache related fields
+	cacheMutex       sync.RWMutex
+	allowListCache   map[string]CacheEntry
 }
 
 // NewClient creates a new LinodeClient
@@ -134,6 +144,7 @@ func NewClient(logger *zap.Logger, cfg *config.Config, metricsClient MetricsClie
 		config:           cfg,
 		metrics:          metricsClient,
 		rateLimiter:      rate.NewLimiter(rate.Limit(rps), 1),
+		allowListCache:   make(map[string]CacheEntry),
 	}
 }
 
@@ -148,7 +159,125 @@ func NewClientWithAPI(logger *zap.Logger, cfg *config.Config, api LinodeAPI, met
 		config:           cfg,
 		metrics:          metricsClient,
 		rateLimiter:      rate.NewLimiter(rate.Limit(rps), 1),
+		allowListCache:   make(map[string]CacheEntry),
 	}
+}
+
+// InitializeCache fetches the allow lists for all configured databases and caches them
+func (c *Client) InitializeCache(ctx context.Context) error {
+	c.logger.Info("Initializing allow list cache")
+	
+	// Get all configured database IDs
+	dbIDs := make(map[string]string) // map[dbID]dbName
+	for _, nodepool := range c.config.Nodepools {
+		for _, db := range nodepool.Databases {
+			dbIDs[db.ID] = db.Name
+		}
+	}
+	
+	// Fetch and cache allow lists for all databases
+	var lastErr error
+	for dbID, dbName := range dbIDs {
+		if err := c.fetchAndCacheAllowList(ctx, dbID, dbName); err != nil {
+			c.logger.Error("Failed to initialize cache for database",
+				zap.String("database_id", dbID),
+				zap.String("database_name", dbName),
+				zap.Error(err),
+			)
+			lastErr = err
+		}
+	}
+	
+	return lastErr
+}
+
+// fetchAndCacheAllowList fetches the allow list for a database and caches it
+func (c *Client) fetchAndCacheAllowList(ctx context.Context, dbID, dbName string) error {
+	// Wait for rate limiter
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return fmt.Errorf("rate limiter error: %w", err)
+	}
+	
+	// Get current allow list
+	allowList, err := c.api.GetDatabaseAllowList(ctx, dbID)
+	if err != nil {
+		return err
+	}
+	
+	// Check for 0.0.0.0/0 in the allow list
+	for _, entry := range allowList {
+		if entry == "0.0.0.0/0" || entry == "::/0" {
+			c.logger.Warn("Open access detected in database allow list",
+				zap.String("database", dbName),
+				zap.String("entry", entry),
+			)
+			c.metrics.IncrementAllowListOpenAccessAlerts(dbName)
+		}
+	}
+	
+	// Update cache
+	c.cacheMutex.Lock()
+	c.allowListCache[dbID] = CacheEntry{
+		AllowList:   allowList,
+		LastFetched: time.Now(),
+	}
+	c.cacheMutex.Unlock()
+	
+	c.logger.Info("Cached allow list for database",
+		zap.String("database_id", dbID),
+		zap.String("database_name", dbName),
+		zap.Int("entries", len(allowList)),
+	)
+	
+	return nil
+}
+
+// getCachedAllowList returns the cached allow list for a database
+// If the cache is empty, it fetches and caches the allow list
+func (c *Client) getCachedAllowList(ctx context.Context, dbID, dbName string) ([]string, error) {
+	// Try to get from cache first
+	c.cacheMutex.RLock()
+	entry, exists := c.allowListCache[dbID]
+	c.cacheMutex.RUnlock()
+	
+	if exists {
+		c.logger.Debug("Using cached allow list",
+			zap.String("database_id", dbID),
+			zap.String("database_name", dbName),
+			zap.Time("last_fetched", entry.LastFetched),
+		)
+		return entry.AllowList, nil
+	}
+	
+	// Not in cache, fetch from API
+	c.logger.Debug("Allow list not in cache, fetching from API",
+		zap.String("database_id", dbID),
+		zap.String("database_name", dbName),
+	)
+	
+	// Fetch and cache
+	err := c.fetchAndCacheAllowList(ctx, dbID, dbName)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Get from cache now
+	c.cacheMutex.RLock()
+	entry = c.allowListCache[dbID]
+	c.cacheMutex.RUnlock()
+	
+	return entry.AllowList, nil
+}
+
+// invalidateCache removes a database's allow list from the cache
+func (c *Client) invalidateCache(dbID string) {
+	c.cacheMutex.Lock()
+	delete(c.allowListCache, dbID)
+	c.cacheMutex.Unlock()
+	
+	c.logger.Debug("Invalidated cache for database",
+		zap.String("database_id", dbID),
+	)
 }
 
 // UpdateAllowList updates the database allow list for all databases associated with a nodepool
@@ -261,21 +390,10 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 
 	// Use retry for reliability
 	return utils.RetryWithBackoff(ctx, c.logger, c.config.Retry, "update_allow_list", func() error {
-		// Get current allow list
-		allowList, err := c.api.GetDatabaseAllowList(ctx, dbID)
+		// Get current allow list from cache or API
+		allowList, err := c.getCachedAllowList(ctx, dbID, dbName)
 		if err != nil {
 			return err
-		}
-
-		// Check for 0.0.0.0/0 in the allow list
-		for _, entry := range allowList {
-			if entry == "0.0.0.0/0" || entry == "::/0" {
-				c.logger.Warn("Open access detected in database allow list",
-					zap.String("database", dbName),
-					zap.String("entry", entry),
-				)
-				c.metrics.IncrementAllowListOpenAccessAlerts(dbName)
-			}
 		}
 
 		// Convert to a map for easy manipulation
@@ -348,6 +466,9 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 		err = c.api.UpdateDatabaseAllowList(ctx, dbID, newAllowList)
 		if err == nil {
 			c.metrics.IncrementAllowListUpdates(dbName, operation)
+			
+			// Invalidate cache after successful update
+			c.invalidateCache(dbID)
 		}
 		return err
 	}, utils.DefaultIsRetryable)
