@@ -599,6 +599,9 @@ func TestRealWorldRecoveryScenario(t *testing.T) {
 					errCh <- errors.New("client rate limiter Wait returned an error")
 				}
 			}()
+		} else {
+			// After failure, replica1 should not try to become leader again
+			// Just wait forever without taking leadership
 		}
 		
 		// Block until the test is done
