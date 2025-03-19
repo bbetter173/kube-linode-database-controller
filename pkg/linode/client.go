@@ -397,55 +397,55 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 		}
 
 		// Convert to a map for easy manipulation
+		// Normalize all IPs when adding to the map
 		ipSet := make(map[string]bool)
 		for _, entry := range allowList {
-			ipSet[entry] = true
+			ipSet[normalizeIP(entry)] = true
 		}
 
 		// Add or remove the IP
 		modified := false
 
 		if operation == "add" {
-			// For adding, we use the exact IP format provided
-			if !ipSet[ip] {
-				ipSet[ip] = true
+			// Normalize the IP for consistent handling
+			ipToAdd := normalizeIP(ip)
+			
+			// Check if the normalized IP already exists in the allow list
+			if !ipSet[ipToAdd] {
+				ipSet[ipToAdd] = true
 				modified = true
 				c.logger.Info("Adding IP to database allow list",
 					zap.String("database", dbName),
-					zap.String("ip", ip),
+					zap.String("ip", ipToAdd),
+					zap.String("original_ip", ip),
 					zap.String("node", nodeName),
 				)
 			} else {
 				c.logger.Debug("IP already in database allow list",
 					zap.String("database", dbName),
-					zap.String("ip", ip),
+					zap.String("ip", ipToAdd),
+					zap.String("original_ip", ip),
 				)
 			}
 		} else if operation == "remove" {
-			// For removing, we need to handle CIDR notation
+			// Normalize the IP for consistent handling
 			ipToRemove := normalizeIP(ip)
-			found := false
 			
-			// Look for the IP in the allow list, considering CIDR notation
-			for entry := range ipSet {
-				if normalizeIP(entry) == ipToRemove {
-					delete(ipSet, entry)
-					found = true
-					modified = true
-					c.logger.Info("Removing IP from database allow list",
-						zap.String("database", dbName),
-						zap.String("ip", ip),
-						zap.String("node", nodeName),
-						zap.String("matched_entry", entry),
-					)
-					break
-				}
-			}
-			
-			if !found {
+			// Check if the normalized IP exists in the allow list
+			if ipSet[ipToRemove] {
+				delete(ipSet, ipToRemove)
+				modified = true
+				c.logger.Info("Removing IP from database allow list",
+					zap.String("database", dbName),
+					zap.String("ip", ipToRemove),
+					zap.String("original_ip", ip),
+					zap.String("node", nodeName),
+				)
+			} else {
 				c.logger.Debug("IP not in database allow list",
 					zap.String("database", dbName),
-					zap.String("ip", ip),
+					zap.String("ip", ipToRemove),
+					zap.String("original_ip", ip),
 				)
 			}
 		}
@@ -456,6 +456,7 @@ func (c *Client) updateDatabaseAllowList(ctx context.Context, dbID, dbName, node
 		}
 
 		// Convert back to slice and sort
+		// When adding back to the list, we use the normalized IPs
 		newAllowList := make([]string, 0, len(ipSet))
 		for entry := range ipSet {
 			newAllowList = append(newAllowList, entry)
