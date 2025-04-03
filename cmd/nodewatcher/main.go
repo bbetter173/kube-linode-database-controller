@@ -119,6 +119,12 @@ func main() {
 		cancel()
 	}()
 	
+	// Initialize the allow list cache
+	logger.Info("Initializing allow list cache")
+	if err := linodeClient.InitializeCache(ctx); err != nil {
+		logger.Error("Failed to fully initialize allow list cache, continuing with partial cache", zap.Error(err))
+	}
+	
 	// Start Kubernetes watcher with leader election
 	logger.Info("Starting node watcher")
 	if err := k8sClient.Start(ctx); err != nil {

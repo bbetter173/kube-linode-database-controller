@@ -40,6 +40,8 @@ type Metrics struct {
 	// Application metrics
 	LeaderStatus           prometheus.Gauge
 	PendingDeletions       *prometheus.GaugeVec
+	LeaderElectionErrors   *prometheus.CounterVec
+	LeaderElectionRestarts prometheus.Counter
 }
 
 // NewMetrics creates a new Metrics instance
@@ -161,6 +163,16 @@ func NewMetrics(logger *zap.Logger) *Metrics {
 			},
 			[]string{"nodepool"},
 		),
+		
+		LeaderElectionErrors: promauto.With(registry).NewCounterVec(prometheus.CounterOpts{
+			Name: "node_watcher_leader_election_errors_total",
+			Help: "Total number of leader election errors by type",
+		}, []string{"type"}),
+		
+		LeaderElectionRestarts: promauto.With(registry).NewCounter(prometheus.CounterOpts{
+			Name: "node_watcher_leader_election_restarts_total",
+			Help: "Total number of leader election process restarts",
+		}),
 	}
 	
 	return metrics
@@ -302,4 +314,14 @@ func (m *Metrics) SetNodeCount(nodepool string, count int) {
 func (m *Metrics) ObserveOperationDuration(operation string, result string, durationSeconds float64) {
 	// This is just a stub method for backward compatibility
 	// Operation duration is now tracked via specific histogram metrics
+}
+
+// IncrementLeaderElectionError increments the LeaderElectionErrors counter
+func (m *Metrics) IncrementLeaderElectionError(errorType string) {
+	m.LeaderElectionErrors.WithLabelValues(errorType).Inc()
+}
+
+// IncrementLeaderElectionRestart increments the LeaderElectionRestarts counter
+func (m *Metrics) IncrementLeaderElectionRestart() {
+	m.LeaderElectionRestarts.Inc()
 } 
